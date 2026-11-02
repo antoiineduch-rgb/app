@@ -1,5 +1,6 @@
-import { designs,shapePath,makeSTL } from './geometry.js';
+import { designs,shapePath } from './geometry.js';
 import { prepareSVG } from './svg-import.js';
+import { makeClockSTL } from './mesh.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial={design:'petal',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true};
@@ -116,8 +117,8 @@ $('svgUpload').onchange=async e=>{
   }
 };
 // Keep the editor responsive while the mesh is built. If a host blocks workers,
-// retain a local fallback; the original height grid is kept for that case.
-function meshAsync(heights,n,signal){
+// retain a local fallback; the original outline is kept for that case.
+function meshAsync(alpha,n,settings,signal){
   return new Promise((resolve,reject)=>{
     let worker=null,timer=null,settled=false,fallingBack=false;
     const clean=()=>{clearTimeout(timer);worker?.terminate();signal.removeEventListener('abort',abort);};
@@ -125,7 +126,7 @@ function meshAsync(heights,n,signal){
     const abort=()=>finish(new DOMException('Export cancelled','AbortError'));
     const fallback=()=>{
       if(settled||fallingBack)return;fallingBack=true;clearTimeout(timer);worker?.terminate();
-      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();finish(null,makeSTL(heights,n,1));}catch(error){finish(error);}},0);
+      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();finish(null,makeClockSTL(alpha,n,settings));}catch(error){finish(error);}},0);
     };
     signal.addEventListener('abort',abort,{once:true});
     if(signal.aborted){abort();return;}
@@ -134,12 +135,13 @@ function meshAsync(heights,n,signal){
       worker.onmessage=({data})=>{
         if(data.id!==1||settled)return;
         if(data.error){finish(new Error(data.error));return;}
+        if(data.stage)$('exportStatus').textContent=data.stage==='outline'?'Smoothing your outline…':data.stage==='details'?'Adding your surface details…':'Finishing your print file…';
         if(data.buffer)finish(null,data.buffer);
       };
       worker.onerror=event=>{event.preventDefault();fallback();};
-      const copy=heights.buffer.slice(0);
-      worker.postMessage({id:1,heights:copy,n,step:1},[copy]);
-      timer=setTimeout(fallback,15000);
+      const copy=alpha.buffer.slice(0);
+      worker.postMessage({id:1,alpha:copy,n,settings},[copy]);
+      timer=setTimeout(fallback,60000);
     }catch{fallback();}
   });
 }
@@ -162,31 +164,14 @@ $('export').onclick=async()=>{
   await new Promise(r=>setTimeout(r,0));
   try{
     controller.signal.throwIfAborted();
-    const n=settings.diameter,canvas=document.createElement('canvas');canvas.width=canvas.height=n;const ctx=canvas.getContext('2d',{willReadFrequently:true});
+    const n=Math.ceil(settings.diameter/.15),canvas=document.createElement('canvas');canvas.width=canvas.height=n;const ctx=canvas.getContext('2d',{willReadFrequently:true});
     ctx.scale(n/400,n/400);
     if(settings.design==='custom')ctx.drawImage(image,0,0,400,400);else{ctx.fillStyle='#fff';ctx.fill(new Path2D(outlines.get(settings.design)));}
-    // Normalize the silhouette around its bounding box so the largest
-    // dimension spans the requested diameter rather than the SVG's whitespace.
-    const source=ctx.getImageData(0,0,n,n);let minX=n,minY=n,maxX=-1,maxY=-1;
-    for(let y=0;y<n;y++)for(let x=0;x<n;x++)if(source.data[(y*n+x)*4+3]>=128){minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}
-    if(maxX<0)throw Error('This shape has no printable filled area. Try another SVG.');
-    const extent=Math.max(maxX-minX+1,maxY-minY+1)/2,centerX=(minX+maxX+1)/2,centerY=(minY+maxY+1)/2;
-    const copy=document.createElement('canvas');copy.width=copy.height=n;copy.getContext('2d').putImageData(source,0,0);
-    ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,n,n);ctx.drawImage(copy,centerX-extent,centerY-extent,extent*2,extent*2,0,0,n,n);
-    const pixels=ctx.getImageData(0,0,n,n).data,heights=new Float32Array(n*n);
-    for(let y=0;y<n;y++)for(let x=0;x<n;x++){
-      const dx=x+.5-n/2,dy=y+.5-n/2,r=Math.hypot(dx,dy),i=y*n+x;
-      if(pixels[i*4+3]<128||r<settings.hole/2)continue;
-      let h=settings.thickness;
-      if(settings.texture==='ripple'&&Math.floor(r/2)%2===0)h+=.4;
-      if(settings.texture==='grain'&&(Math.floor((dx+dy)/2)%3===0||Math.floor((dx-dy)/2)%3===0))h+=.4;
-      if(settings.markers){const a=Math.atan2(dx,-dy),nearest=Math.round(a/(Math.PI/6))*(Math.PI/6);if(r>n*.265&&r<n*.31&&Math.abs(Math.sin(a-nearest)*r)<1.3)h=settings.thickness+.8;}
-      heights[(n-1-y)*n+x]=Math.round(h*10)/10;
-    }
-    if(!heights.some(h=>h>0))throw Error('This shape has no printable filled area. Try another SVG.');
+    const pixels=ctx.getImageData(0,0,n,n).data,alpha=new Uint8Array(n*n);
+    for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
     controller.signal.throwIfAborted();
     $('exportStatus').textContent='Creating your print file… You can keep designing.';
-    const buffer=await meshAsync(heights,n,controller.signal);
+    const buffer=await meshAsync(alpha,n,settings,controller.signal);
     controller.signal.throwIfAborted();
     const blob=new Blob([buffer],{type:'model/stl'});exportCache={key,blob};
     downloadClock(blob,settings,key);

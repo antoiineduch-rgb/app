@@ -1,6 +1,7 @@
 // Import self-contained SVG artwork without inserting its markup into the editor.
 // Geometry is measured in an isolated shadow root, then rendered to an alpha
 // silhouette shared by the preview and STL export.
+const SVG_RASTER_SIZE = 2048;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SVG_ELEMENTS = new Set(['svg','g','path','rect','circle','ellipse','polygon','polyline','line','defs','symbol','use','clipPath','mask','linearGradient','radialGradient','stop','pattern','text','tspan','textPath','image']);
 const SVG_ATTRIBUTES = new Set(['id','class','d','x','y','width','height','cx','cy','r','rx','ry','x1','x2','y1','y2','points','transform','viewBox','preserveAspectRatio','maskUnits','maskContentUnits','clipPathUnits','gradientUnits','gradientTransform','patternUnits','patternContentUnits','patternTransform','offset','spreadMethod','lengthAdjust','textLength','startOffset','dx','dy','rotate','pathLength']);
@@ -92,10 +93,10 @@ async function svgImage(svg) {
 
 export async function prepareSVG(source) {
   const svg = sanitizedSVG(source);
-  svg.setAttribute('width', '1024'); svg.setAttribute('height', '1024');
+  svg.setAttribute('width', String(SVG_RASTER_SIZE)); svg.setAttribute('height', String(SVG_RASTER_SIZE));
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   const host = document.createElement('div');
-  host.style.cssText = 'position:fixed;left:-100000px;top:0;opacity:0;pointer-events:none;width:1024px;height:1024px;';
+  host.style.cssText = `position:fixed;left:-100000px;top:0;opacity:0;pointer-events:none;width:${SVG_RASTER_SIZE}px;height:${SVG_RASTER_SIZE}px;`;
   host.attachShadow({ mode: 'closed' }).append(svg); document.body.append(host);
   try {
     // Percentages must be resolved against the original viewport. Leaving them
@@ -148,20 +149,20 @@ export async function prepareSVG(source) {
   } finally { host.remove(); }
   const svgText = new XMLSerializer().serializeToString(svg);
   const decoded = await svgImage(svgText);
-  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1024;
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = SVG_RASTER_SIZE;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(decoded, 0, 0, 1024, 1024);
-  const pixels = ctx.getImageData(0,0,1024,1024).data;
-  let minX=1024,minY=1024,maxX=-1,maxY=-1;
-  for (let y=0;y<1024;y++) for (let x=0;x<1024;x++) if (pixels[(y*1024+x)*4+3] >= 16) {
+  ctx.drawImage(decoded, 0, 0, SVG_RASTER_SIZE, SVG_RASTER_SIZE);
+  const pixels = ctx.getImageData(0,0,SVG_RASTER_SIZE,SVG_RASTER_SIZE).data;
+  let minX=SVG_RASTER_SIZE,minY=SVG_RASTER_SIZE,maxX=-1,maxY=-1;
+  for (let y=0;y<SVG_RASTER_SIZE;y++) for (let x=0;x<SVG_RASTER_SIZE;x++) if (pixels[(y*SVG_RASTER_SIZE+x)*4+3] >= 16) {
     minX=Math.min(minX,x); minY=Math.min(minY,y); maxX=Math.max(maxX,x); maxY=Math.max(maxY,y);
   }
   if (maxX < 0) throw Error('This SVG has no visible artwork. Embedded links and hidden layers aren’t imported; export visible paths and try again.');
-  const fitted = document.createElement('canvas'); fitted.width = fitted.height = 1024;
+  const fitted = document.createElement('canvas'); fitted.width = fitted.height = SVG_RASTER_SIZE;
   const fit = fitted.getContext('2d');
-  const width=maxX-minX+1,height=maxY-minY+1,scale=860/Math.max(width,height);
-  fit.drawImage(canvas,minX,minY,width,height,(1024-width*scale)/2,(1024-height*scale)/2,width*scale,height*scale);
-  fit.globalCompositeOperation='source-in'; fit.fillStyle='#fff'; fit.fillRect(0,0,1024,1024);
+  const width=maxX-minX+1,height=maxY-minY+1,scale=(SVG_RASTER_SIZE*860/1024)/Math.max(width,height);
+  fit.drawImage(canvas,minX,minY,width,height,(SVG_RASTER_SIZE-width*scale)/2,(SVG_RASTER_SIZE-height*scale)/2,width*scale,height*scale);
+  fit.globalCompositeOperation='source-in'; fit.fillStyle='#fff'; fit.fillRect(0,0,SVG_RASTER_SIZE,SVG_RASTER_SIZE);
   const dataURL = fitted.toDataURL('image/png');
   const image = new Image(); image.src = dataURL; await image.decode();
   return { markup: `<image x="0" y="0" width="400" height="400" href="${dataURL}"/>`, image, svgText };
