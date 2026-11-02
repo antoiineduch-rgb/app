@@ -1,0 +1,42 @@
+# Clock Factory
+
+A studio for designing printable clock faces, available in a browser or as a Windows desktop app. The browser editor has no runtime dependencies. Development requires Node.js 22.12.0 or newer; Electron and packaging tools are development dependencies for the desktop version.
+
+```sh
+npm start
+```
+
+The browser development server listens on port 3000 (override with `PORT`). `npm start` and `npm run dev` rebuild the browser script and STL worker before starting. Run `npm ci` before developing the desktop app or running the complete test suite; `npm test` covers geometry, HTTP, and desktop assets.
+
+For static hosting, run `npm run build` and serve `index.html`, `style.css`, `studio.js`, and `export-worker.js` together. Relative asset URLs support hosting under a subdirectory. After updating, reload the page to load the new browser script. The worker is generated from `geometry.js` and `export-worker-source.js`; edit those sources and rebuild rather than editing generated scripts.
+
+STL generation runs in a background worker so the editor stays usable while exporting. You can cancel an in-progress export. The last print file is cached for immediate repeat downloads, including after color-only changes; shape, size, texture, marker, or mechanism changes produce a new file. Hosts that block workers use a local fallback.
+
+Choose one of six designs or upload basic filled SVG geometry, adjust dimensions and finish, and download a binary STL. STL units are millimeters. Export uses a 1 mm height-field grid, including a shaft hole and up to 0.8 mm of surface relief. Slicer inspection is recommended, particularly for disconnected uploaded artwork. Hands and movements are not included. There is no rear movement recess; choose a shaft long enough for the face and relief. Colors are illustrative. Preset settings are stored locally; custom SVG files are session-only. No account, API keys, or installation is needed.
+
+## Windows desktop app
+
+The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
+
+- Run `Clock-Factory-1.0.0-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.0.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+
+End users do not need Node.js or a development server. SVG files are opened locally, and STL files are saved on the computer. Download names use the app version, so later versions will have a different version number.
+
+To develop the desktop app, install Node.js 22.12.0 or newer and run:
+
+```sh
+npm ci
+npm run desktop
+```
+
+To create the Windows x64 installer and portable app on Windows after `npm ci`:
+
+```sh
+npm run dist:win
+npm run dist:win:portable
+```
+
+Both downloads are written to `dist/`. They are currently unsigned; signed distribution requires a code-signing certificate.
+
+The **Windows desktop app** GitHub Actions workflow can be run manually from the repository's Actions tab, or by pushing a version tag such as `v1.0.0`. It installs locked dependencies, builds the assets, runs the tests, and packages both downloads in the same Windows job. Download the **Clock-Factory-Windows-x64** artifact from the completed run; it contains the installer, portable app, and `SHA256SUMS.txt`. Creating the workflow does not start a remote build or publish a release.

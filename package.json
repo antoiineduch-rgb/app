@@ -1,0 +1,67 @@
+{
+  "name": "clock-factory",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js && node server.js",
+    "start": "node build.js && node server.js",
+    "test": "node --test geometry.test.js server.test.js desktop/assets.test.cjs",
+    "desktop": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "dist:win:portable": "npm run build && electron-builder --win portable --x64 --publish never"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
+  },
+  "description": "Design custom 3D printable clocks from SVGs and ready-made designs.",
+  "author": "Clock Factory",
+  "main": "desktop/main.cjs",
+  "build": {
+    "appId": "com.clockfactory.studio",
+    "productName": "Clock Factory",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/main.cjs",
+      "desktop/assets.cjs",
+      "desktop/icon.png",
+      "index.html",
+      "style.css",
+      "studio.js",
+      "export-worker.js",
+      "package.json"
+    ],
+    "win": {
+      "icon": "desktop/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Clock Factory",
+      "artifactName": "Clock-Factory-${version}-Windows-Setup.${ext}"
+    },
+    "publish": null,
+    "portable": {
+      "artifactName": "Clock-Factory-${version}-Windows-Portable.${ext}"
+    }
+  }
+}
