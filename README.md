@@ -12,14 +12,14 @@ For static hosting, run `npm run build` and serve `index.html`, `style.css`, `st
 
 STL generation runs in a background worker so the editor stays usable while exporting. You can cancel an in-progress export. The last print file is cached for immediate repeat downloads, including after color-only changes; shape, size, texture, marker, or mechanism changes produce a new file. Hosts that block workers use a local fallback.
 
-Choose one of six designs or upload basic filled SVG geometry, adjust dimensions and finish, and download a binary STL. STL units are millimeters. Export uses a 1 mm height-field grid, including a shaft hole and up to 0.8 mm of surface relief. Slicer inspection is recommended, particularly for disconnected uploaded artwork. Hands and movements are not included. There is no rear movement recess; choose a shaft long enough for the face and relief. Colors are illustrative. Preset settings are stored locally; custom SVG files are session-only. No account, API keys, or installation is needed.
+Choose one of six designs or upload SVG artwork (filled shapes, stroked outlines, local styles, symbols, and clipping), adjust dimensions and finish, and download a binary STL. STL units are millimeters. Export uses a 1 mm height-field grid, including a shaft hole and up to 0.8 mm of surface relief. Slicer inspection is recommended, particularly for disconnected uploaded artwork. Hands and movements are not included. There is no rear movement recess; choose a shaft long enough for the face and relief. Colors are illustrative. Preset settings are stored locally; custom SVG files are session-only. No account, API keys, or installation is needed.
 
 ## Windows desktop app
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.0.0-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.0.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.0.1-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.0.1-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVG files are opened locally, and STL files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
@@ -40,3 +40,7 @@ npm run dist:win:portable
 Both downloads are written to `dist/`. They are currently unsigned; signed distribution requires a code-signing certificate.
 
 The **Windows desktop app** GitHub Actions workflow can be run manually from the repository's Actions tab, or by pushing a version tag such as `v1.0.0`. It installs locked dependencies, builds the assets, runs the tests, and packages both downloads in the same Windows job. Download the **Clock-Factory-Windows-x64** artifact from the completed run; it contains the installer, portable app, and `SHA256SUMS.txt`. Creating the workflow does not start a remote build or publish a release.
+
+SVG imports are fitted to their visible artwork, including drawings with large viewBoxes and transformed groups. Preview and STL share the same normalized silhouette; original SVG colors become the selected face color. External resources and executable content are removed. Custom artwork lasts for the current session.
+
+Run `npm run test:svg` for desktop SVG import regressions, including visible preview pixels and STL output. On display-free Linux, run `npm run build` followed by `npx electron --no-sandbox --ozone-platform=headless --disable-gpu tests/svg-import.electron.cjs`.

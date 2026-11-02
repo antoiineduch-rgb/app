@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs><clipPath id="dial"><circle cx="100" cy="100" r="85"/></clipPath></defs>
+  <rect width="200" height="200" fill="#333" clip-path="url(#dial)"/>
+</svg>

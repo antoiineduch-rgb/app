@@ -1,4 +1,5 @@
 import { designs,shapePath,makeSTL } from './geometry.js';
+import { prepareSVG } from './svg-import.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial={design:'petal',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true};
@@ -12,11 +13,11 @@ try{
     }
   }
 }catch{}
-let customSVG=null,customImage=null,zoom=1,rx=12,ry=-19,rz=-7;
+let customSVG=null,customImage=null,customRevision=0,importSequence=0,importPending=false,zoom=1,rx=12,ry=-19,rz=-7;
 const outlines=new Map(designs.map(d=>[d.id,shapePath(d.id)]));
 const workerURL=new URL('./export-worker.js',document.currentScript?.src||location.href);
 let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null;
-function geometryKey(settings=state,svg=customSVG){return JSON.stringify([settings.design,settings.design==='custom'?svg:null,settings.diameter,settings.thickness,settings.hole,settings.texture,settings.markers]);}
+function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?customRevision:null,settings.diameter,settings.thickness,settings.hole,settings.texture,settings.markers]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
 function flushSave(){clearTimeout(saveTimer);try{localStorage.setItem('clock-factory',JSON.stringify({...state,design:state.design==='custom'?'petal':state.design}));}catch{document.querySelector('.local-status').textContent='Session only';}}
 function persist(){clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,200);}
@@ -25,7 +26,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)flushSave()
 function faceMarkup(){return customSVG&&state.design==='custom'?customSVG:`<path d="${outlines.get(state.design)}"/>`;}
 function render({forceInputs=false}={}){
   const color=colors[state.color][1];
-  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,customSVG]);
+  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,customRevision]);
   if(nextPreviewKey!==previewKey){
   let ticks='';
   if(state.markers)for(let i=0;i<12;i++)ticks+=`<rect x="197.5" y="76" width="5" height="${i%3===0?17:10}" rx="2" transform="rotate(${i*30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
@@ -91,29 +92,28 @@ function scheduleView(){if(viewFrame===null)viewFrame=requestAnimationFrame(()=>
 $('clockStage').onpointermove=e=>{if(!drag)return;ry=Math.max(-60,Math.min(60,drag[3]+(e.clientX-drag[0])*.3));rx=Math.max(-50,Math.min(50,drag[2]-(e.clientY-drag[1])*.3));scheduleView();};
 $('clockStage').onpointerup=$('clockStage').onpointercancel=()=>drag=null;
 $('clockStage').addEventListener('wheel',e=>{e.preventDefault();zoom=Math.min(1.4,Math.max(.6,zoom-e.deltaY*.001));scheduleView();},{passive:false});
-$('reset').onclick=()=>{exportController?.abort();state={...initial};customSVG=customImage=null;lastDownloadKey=null;for(const id of ['thickness','hole'])delete $(id).dataset.editing;$('svgUpload').value='';$('uploadStatus').textContent='';tab(false);$('restoreView').click();render({forceInputs:true});validateDimensions();toast('A fresh start. Make something yours.');};
+$('reset').onclick=()=>{importSequence++;importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;exportController?.abort();state={...initial};customSVG=customImage=null;lastDownloadKey=null;for(const id of ['thickness','hole'])delete $(id).dataset.editing;$('svgUpload').value='';$('uploadStatus').textContent='';tab(false);$('restoreView').click();render({forceInputs:true});validateDimensions();toast('A fresh start. Make something yours.');};
 $('help').onclick=()=>$('helpDialog').showModal();$('closeHelp').onclick=$('gotIt').onclick=()=>$('helpDialog').close();
 $('svgUpload').onchange=async e=>{
   const file=e.target.files[0];if(!file)return;
+  e.target.value='';
+  const sequence=++importSequence;
+  importPending=true;$('uploadPanel').setAttribute('aria-busy','true');$('export').disabled=true;
+  $('uploadStatus').textContent=`Opening ${file.name}…`;
   try{
     if(file.size>1024*1024)throw Error('Please choose an SVG smaller than 1 MB.');
-    const doc=new DOMParser().parseFromString(await file.text(),'image/svg+xml');
-    if(doc.querySelector('parsererror')||doc.documentElement.localName!=='svg')throw Error('This file isn’t a valid SVG.');
-    if(doc.querySelector('script,foreignObject,image,use,style,animate,animateTransform,set'))throw Error('Use a self-contained SVG with basic filled vector shapes.');
-    const svg=doc.documentElement;
-    // Only basic geometry and transforms survive. External resources, events,
-    // scripts, links, CSS and arbitrary markup never enter the live document.
-    const allowed=new Set(['svg','g','path','rect','circle','ellipse','polygon','polyline','line']);
-    const attrs=new Set(['d','x','y','width','height','cx','cy','r','rx','ry','x1','x2','y1','y2','points','transform','fill-rule']);
-    const sanitize=el=>{for(const child of [...el.children]){if(!allowed.has(child.localName)){child.remove();continue;}sanitize(child);}for(const a of [...el.attributes])if(!attrs.has(a.name))el.removeAttribute(a.name);};
-    let box=(svg.getAttribute('viewBox')||`0 0 ${parseFloat(svg.getAttribute('width'))||400} ${parseFloat(svg.getAttribute('height'))||400}`).trim().split(/[ ,]+/).map(Number);
-    if(box.length!==4||!box.every(Number.isFinite)||box[2]<=0||box[3]<=0)throw Error('The SVG needs a valid viewBox or dimensions.');
-    sanitize(svg);const scale=336/Math.max(box[2],box[3]),tx=200-(box[0]+box[2]/2)*scale,ty=200-(box[1]+box[3]/2)*scale;
-    const markup=`<g transform="translate(${tx} ${ty}) scale(${scale})">${svg.innerHTML}</g>`;
-    const img=new Image();const url=URL.createObjectURL(new Blob([`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><g fill="white">${markup}</g></svg>`],{type:'image/svg+xml'}));
-    try{img.src=url;await img.decode();}finally{URL.revokeObjectURL(url);}
-    customSVG=markup;customImage=img;state.design='custom';render();$('uploadStatus').textContent=`Loaded ${file.name}. Custom uploads last for this session.`;toast('Your shape is in. Time to make it your own.');
-  }catch(error){$('uploadStatus').textContent=error.message;toast(error.message);}
+    const prepared=await prepareSVG(await file.text());
+    if(sequence!==importSequence)return;
+    customSVG=prepared.markup;customImage=prepared.image;customRevision++;
+    state.design='custom';render();
+    $('uploadStatus').textContent=`Loaded ${file.name}. Your artwork is fitted to the clock face. Custom uploads last for this session.`;
+    toast('Your SVG is ready. Its filled shapes and outlines form your clock face.');
+  }catch(error){
+    if(sequence!==importSequence)return;
+    $('uploadStatus').textContent=`Couldn’t import ${file.name}: ${error.message}`;toast(error.message);
+  }finally{
+    if(sequence===importSequence){importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;}
+  }
 };
 // Keep the editor responsive while the mesh is built. If a host blocks workers,
 // retain a local fallback; the original height grid is kept for that case.
@@ -152,7 +152,7 @@ function downloadClock(blob,settings,key){
 }
 $('cancelExport').onclick=()=>exportController?.abort();
 $('export').onclick=async()=>{
-  if(exportController||!validateDimensions(true))return;
+  if(importPending||exportController||!validateDimensions(true))return;
   const settings={...state},key=geometryKey(settings),image=customImage;
   if(exportCache?.key===key){downloadClock(exportCache.blob,settings,key);return;}
   const controller=new AbortController();exportController=controller;
@@ -194,7 +194,7 @@ $('export').onclick=async()=>{
     if(error.name==='AbortError')toast('Download cancelled. Your design is still here.');
     else toast('Could not export: '+error.message);
   }finally{
-    exportController=null;button.disabled=false;button.innerHTML='Download STL <span>↓</span>';
+    exportController=null;button.disabled=importPending;button.innerHTML='Download STL <span>↓</span>';
     $('exportProgress').hidden=true;$('printSection').setAttribute('aria-busy','false');
   }
 };

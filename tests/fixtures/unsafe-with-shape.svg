@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" onload="window.__svgExecuted=true">
+  <script>window.__svgExecuted=true;</script>
+  <foreignObject x="0" y="0" width="200" height="200"><div xmlns="http://www.w3.org/1999/xhtml" onclick="window.__svgExecuted=true">Not vector artwork</div></foreignObject>
+  <image href="https://example.invalid/svg-test-image.png" width="200" height="200"/>
+  <use href="https://example.invalid/external.svg#shape"/>
+  <circle cx="100" cy="100" r="85" fill="#333"/>
+</svg>

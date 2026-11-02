@@ -1,6 +1,6 @@
 {
   "name": "clock-factory",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
     "test": "node --test geometry.test.js server.test.js desktop/assets.test.cjs",
     "desktop": "npm run build && electron .",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
-    "dist:win:portable": "npm run build && electron-builder --win portable --x64 --publish never"
+    "dist:win:portable": "npm run build && electron-builder --win portable --x64 --publish never",
+    "test:svg": "npm run build && electron tests/svg-import.electron.cjs"
   },
   "engines": {
     "node": ">=22.12.0"
