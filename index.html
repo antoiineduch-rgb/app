@@ -13,7 +13,19 @@
 <div class="panel-heading" id="shapeSection"><span class="section-number">01</span><h2>Pick your shape</h2></div>
 <div class="tabs" role="tablist"><button class="selected" id="presetsTab" role="tab" aria-selected="true">Ready-made designs</button><button id="uploadTab" role="tab" aria-selected="false">Upload SVG</button></div>
 <div id="presetPanel"><div class="design-grid" id="designGrid"></div><p class="helper">Tap any shape to try it. You can change it anytime.</p></div>
-<div id="uploadPanel" hidden><label class="upload-area" for="svgUpload"><span>↥</span><strong>Bring your own shape</strong><small>Choose an SVG file · up to 1 MB</small><input type="file" id="svgUpload" accept=".svg,image/svg+xml"></label><p class="helper">Filled shapes and visible outlines become the clock face. Artwork is automatically fitted to the preview. Keep your design connected for printing.</p><p id="uploadStatus" role="status"></p></div>
+<div id="uploadPanel" hidden>
+<label class="upload-area" id="svgDropZone" for="svgUpload"><span aria-hidden="true">↥</span><strong>Drop your SVG here</strong><small>or choose a file · up to 5 MB</small><input type="file" id="svgUpload" accept=".svg,image/svg+xml"></label>
+<p class="helper">Filled shapes and visible outlines form your clock face. Keep the artwork connected for printing.</p>
+<p id="uploadStatus" role="status" aria-live="polite"></p>
+<section id="artworkCard" class="artwork-card" aria-label="Imported artwork" hidden>
+<div class="artwork-file"><img id="artworkThumbnail" alt="Your imported SVG" width="64" height="64"><div><strong id="artworkName"></strong><span id="artworkDetails"></span><span id="artworkSavedStatus"></span></div></div>
+<div class="artwork-actions"><button id="useArtwork">Use this SVG</button><button id="replaceArtwork">Replace</button><button id="removeArtwork" title="Remove this SVG from saved artwork">Remove</button></div>
+<div class="label-row artwork-orientation-label"><span>Turn it your way</span><button id="artResetOrientation">Reset</button></div>
+<div class="artwork-orientation" role="group" aria-label="Artwork orientation"><button id="artRotateLeft" title="Rotate artwork 90 degrees left">Left 90°</button><button id="artRotateRight" title="Rotate artwork 90 degrees right">Right 90°</button><button id="artMirrorX" title="Mirror artwork horizontally">Flip H</button><button id="artMirrorY" title="Mirror artwork vertically">Flip V</button></div>
+<p class="helper">Your clock hands stay upright. The preview and print file use the same orientation.</p>
+</section>
+<section id="savedArtworkSection" class="saved-artwork-section" aria-label="Saved SVG files" hidden><div class="saved-artwork-heading"><h3>Recent SVGs</h3><span>Last 8 · on this device</span></div><div id="savedArtworks" class="saved-artworks"></div></section>
+</div>
 <div class="divider"></div>
 <div class="panel-heading" id="finishSection"><span class="section-number">02</span><h2>Add your personality</h2></div>
 <div class="label-row"><label>Face color</label><span id="colorName">Terracotta</span></div><div class="swatches" id="swatches" role="group" aria-label="Face color"></div><p class="helper">A preview of your filament color. Choose the matching filament when you print.</p>

@@ -37,6 +37,9 @@ jobs:
       - name: Test SVG imports in the desktop app
         run: npm run test:svg
 
+      - name: Test saved SVG artwork and orientation
+        run: npm run test:svg-library
+
       - name: Build Windows installer
         run: npm run dist:win
 

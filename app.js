@@ -1,33 +1,53 @@
 import { designs,shapePath } from './geometry.js';
-import { prepareSVG } from './svg-import.js';
+import { prepareSVG, SVG_IMPORT_MAX_BYTES } from './svg-import.js';
+import { listSavedSVGs, getSavedSVG, saveSVG, deleteSavedSVG } from './svg-library.js';
+import { normalizeOrientation, transformOrientation, placementTransform, drawPlacedArtwork } from './svg-placement.js';
 import { makeClockSTL } from './mesh.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial={design:'petal',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true};
 let state={...initial};
+let artworkOrientation=normalizeOrientation(null),restoreReference=null,restorePending=false;
 try{
   const saved=JSON.parse(localStorage.getItem('clock-factory')||'null');
-  if(saved&&designs.some(d=>d.id===saved.design)&&Number.isInteger(saved.color)&&colors[saved.color]&&['smooth','ripple','grain'].includes(saved.texture)){
-    state={design:saved.design,color:saved.color,texture:saved.texture,markers:typeof saved.markers==='boolean'?saved.markers:true};
+  const artworkId=typeof saved?.artworkId==='string'&&saved.artworkId.length<=128?saved.artworkId:null;
+  const validDesign=saved&&(designs.some(d=>d.id===saved.design)||(saved.design==='custom'&&artworkId));
+  if(validDesign&&Number.isInteger(saved.color)&&colors[saved.color]&&['smooth','ripple','grain'].includes(saved.texture)){
+    state={design:saved.design==='custom'?'petal':saved.design,color:saved.color,texture:saved.texture,markers:typeof saved.markers==='boolean'?saved.markers:true};
     for(const [key,min,max,step]of[['diameter',100,300,10],['thickness',2,10,.5],['hole',5,15,.5]]){
       const value=Number(saved[key]);state[key]=Number.isFinite(value)?Math.min(max,Math.max(min,Math.round(value/step)*step)):initial[key];
     }
+    artworkOrientation=normalizeOrientation(saved.artworkOrientation);
+    if(artworkId){restoreReference={id:artworkId,useCustom:saved.design==='custom',orientation:[...artworkOrientation]};restorePending=true;}
   }
 }catch{}
+let activeArtwork=null,gallerySequence=0,deletingArtwork=false,settingsSaved=true;
 let customSVG=null,customImage=null,customRevision=0,importSequence=0,importPending=false,zoom=1,rx=12,ry=-19,rz=-7;
 const outlines=new Map(designs.map(d=>[d.id,shapePath(d.id)]));
 const workerURL=new URL('./export-worker.js',document.currentScript?.src||location.href);
 let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null;
-function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?customRevision:null,settings.diameter,settings.thickness,settings.hole,settings.texture,settings.markers]);}
+function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation]:null,settings.diameter,settings.thickness,settings.hole,settings.texture,settings.markers]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
-function flushSave(){clearTimeout(saveTimer);try{localStorage.setItem('clock-factory',JSON.stringify({...state,design:state.design==='custom'?'petal':state.design}));}catch{document.querySelector('.local-status').textContent='Session only';}}
+function updateSaveLabel(){
+  document.querySelector('.local-status').textContent=restorePending?'Opening saved SVG…':importPending?'Saving SVG…':!settingsSaved?'Session only':activeArtwork&&!activeArtwork.id?'SVG: session only':'Saved on this device';
+}
+function flushSave(){
+  clearTimeout(saveTimer);if(restorePending)return;
+  const reference=activeArtwork?.id||restoreReference?.id||null;
+  let design=state.design;
+  if(design==='custom'&&!reference)design='petal';
+  if(restoreReference?.useCustom&&!activeArtwork)design='custom';
+  try{localStorage.setItem('clock-factory',JSON.stringify({...state,design,artworkId:reference,artworkOrientation}));settingsSaved=true;}
+  catch{settingsSaved=false;}
+  updateSaveLabel();
+}
 function persist(){clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,200);}
 window.addEventListener('pagehide',flushSave);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)flushSave();});
-function faceMarkup(){return customSVG&&state.design==='custom'?customSVG:`<path d="${outlines.get(state.design)}"/>`;}
+function faceMarkup(){return customSVG&&state.design==='custom'?`<g transform="${placementTransform(artworkOrientation)}">${customSVG}</g>`:`<path d="${outlines.get(state.design)||outlines.get('petal')}"/>`;}
 function render({forceInputs=false}={}){
   const color=colors[state.color][1];
-  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,customRevision]);
+  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,customRevision,artworkOrientation]);
   if(nextPreviewKey!==previewKey){
   let ticks='';
   if(state.markers)for(let i=0;i<12;i++)ticks+=`<rect x="197.5" y="76" width="5" height="${i%3===0?17:10}" rx="2" transform="rotate(${i*30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
@@ -51,9 +71,9 @@ function render({forceInputs=false}={}){
   $('designTitle').innerHTML=d?`The ${d.name} Clock <span>↗</span>`:'Your Custom Clock <span>↗</span>';
   $('designDescription').textContent=d?.description||'Your own shape. Your own sense of time.';
   $('clockObject').style.filter=`drop-shadow(3px ${Math.round(state.thickness*1.5)}px 0 ${color} ) drop-shadow(9px 19px 12px #726b4f30)`;
-  persist();
+  updateArtworkUI();persist();
 }
-designs.forEach(d=>{const b=document.createElement('button');b.className='design-card';b.dataset.design=d.id;b.innerHTML=`<svg viewBox="0 0 400 400" aria-hidden="true"><path d="${outlines.get(d.id)}" fill="${d.id==='petal'?'#bf977b':'#c5c9b6'}"/><path d="M200 130V200L245 227" fill="none" stroke="#f7f5e9" stroke-width="10" stroke-linecap="round"/></svg>${d.name}`;b.onclick=()=>{state.design=d.id;render();};$('designGrid').append(b);});
+designs.forEach(d=>{const b=document.createElement('button');b.className='design-card';b.dataset.design=d.id;b.innerHTML=`<svg viewBox="0 0 400 400" aria-hidden="true"><path d="${outlines.get(d.id)}" fill="${d.id==='petal'?'#bf977b':'#c5c9b6'}"/><path d="M200 130V200L245 227" fill="none" stroke="#f7f5e9" stroke-width="10" stroke-linecap="round"/></svg>${d.name}`;b.onclick=()=>{cancelRestoration();state.design=d.id;render();};$('designGrid').append(b);});
 colors.forEach(([name,color],i)=>{const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=name;b.setAttribute('aria-label',name);b.onclick=()=>{state.color=i;render();};$('swatches').append(b);});
 document.querySelectorAll('[data-texture]').forEach(b=>b.onclick=()=>{state.texture=b.dataset.texture;render();});
 function validateDimensions(focus=false){
@@ -93,28 +113,146 @@ function scheduleView(){if(viewFrame===null)viewFrame=requestAnimationFrame(()=>
 $('clockStage').onpointermove=e=>{if(!drag)return;ry=Math.max(-60,Math.min(60,drag[3]+(e.clientX-drag[0])*.3));rx=Math.max(-50,Math.min(50,drag[2]-(e.clientY-drag[1])*.3));scheduleView();};
 $('clockStage').onpointerup=$('clockStage').onpointercancel=()=>drag=null;
 $('clockStage').addEventListener('wheel',e=>{e.preventDefault();zoom=Math.min(1.4,Math.max(.6,zoom-e.deltaY*.001));scheduleView();},{passive:false});
-$('reset').onclick=()=>{importSequence++;importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;exportController?.abort();state={...initial};customSVG=customImage=null;lastDownloadKey=null;for(const id of ['thickness','hole'])delete $(id).dataset.editing;$('svgUpload').value='';$('uploadStatus').textContent='';tab(false);$('restoreView').click();render({forceInputs:true});validateDimensions();toast('A fresh start. Make something yours.');};
+$('reset').onclick=()=>{
+  importSequence++;restorePending=false;restoreReference=null;importPending=false;activeArtwork=null;
+  artworkOrientation=normalizeOrientation(null);$('uploadPanel').setAttribute('aria-busy','false');
+  $('export').disabled=!!exportController;exportController?.abort();state={...initial};customSVG=customImage=null;lastDownloadKey=null;
+  for(const id of ['thickness','hole'])delete $(id).dataset.editing;
+  $('svgUpload').value='';$('uploadStatus').textContent='';tab(false);$('restoreView').click();render({forceInputs:true});validateDimensions();toast('A fresh start. Your saved SVGs are still available.');
+};
 $('help').onclick=()=>$('helpDialog').showModal();$('closeHelp').onclick=$('gotIt').onclick=()=>$('helpDialog').close();
-$('svgUpload').onchange=async e=>{
-  const file=e.target.files[0];if(!file)return;
-  e.target.value='';
-  const sequence=++importSequence;
-  importPending=true;$('uploadPanel').setAttribute('aria-busy','true');$('export').disabled=true;
-  $('uploadStatus').textContent=`Opening ${file.name}…`;
+function cancelRestoration(){
+  if(!restorePending&&!restoreReference&&!importPending)return;
+  const wasLoading=importPending||restorePending;
+  importSequence++;restorePending=false;restoreReference=null;importPending=false;
+  $('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;
+  if(wasLoading)$('uploadStatus').textContent='SVG loading cancelled.';
+  updateSaveLabel();
+}
+function updateArtworkUI(){
+  const busy=importPending||deletingArtwork;
+  $('export').disabled=busy||restorePending||!!exportController;
+  $('artworkCard').hidden=!activeArtwork;
+  $('svgDropZone').classList.toggle('has-artwork',!!activeArtwork);
+  $('artworkCard').setAttribute('aria-busy',String(busy));
+  $('svgUpload').disabled=deletingArtwork;$('svgDropZone').setAttribute('aria-disabled',String(deletingArtwork));
+  if(activeArtwork){
+    $('artworkName').textContent=activeArtwork.name;$('artworkName').title=activeArtwork.name;
+    $('artworkThumbnail').src=activeArtwork.thumbnail;
+    $('artworkThumbnail').style.transform=`matrix(${artworkOrientation.join(',')},0,0)`;
+    $('artworkDetails').textContent=`SVG · ${activeArtwork.size<1024*1024?Math.max(1,Math.round(activeArtwork.size/1024))+' KB':(activeArtwork.size/(1024*1024)).toFixed(1)+' MB'}`;
+    $('artworkSavedStatus').textContent=busy?'Saving…':activeArtwork.id?'Saved on this device':'Session only — SVG not saved';
+    $('artworkSavedStatus').classList.toggle('session-only',!busy&&!activeArtwork.id);
+    $('useArtwork').hidden=state.design==='custom';
+  }
+  for(const id of ['useArtwork','replaceArtwork','removeArtwork','artRotateLeft','artRotateRight','artMirrorX','artMirrorY','artResetOrientation'])$(id).disabled=busy;
+  for(const button of $('savedArtworks').querySelectorAll('button')){
+    button.disabled=deletingArtwork;button.classList.toggle('selected',button.dataset.artworkId===activeArtwork?.id);
+  }
+  updateSaveLabel();
+}
+async function refreshGallery(){
+  const sequence=++gallerySequence;
   try{
-    if(file.size>1024*1024)throw Error('Please choose an SVG smaller than 1 MB.');
-    const prepared=await prepareSVG(await file.text());
+    const entries=await listSavedSVGs();if(sequence!==gallerySequence)return;
+    $('savedArtworks').replaceChildren();
+    $('savedArtworkSection').hidden=!entries.length;
+    for(const entry of entries){
+      const button=document.createElement('button');button.type='button';button.dataset.artworkId=entry.id;button.title=entry.name;button.setAttribute('aria-label',`Use saved SVG: ${entry.name}`);
+      const image=document.createElement('img');image.src=entry.thumbnail;image.alt='';image.width=image.height=53;
+      const name=document.createElement('span');name.textContent=entry.name;button.append(image,name);
+      button.onclick=()=>{if(entry.id===activeArtwork?.id&&!importPending){state.design='custom';render();}else loadSavedArtwork(entry.id);};$('savedArtworks').append(button);
+    }
+    updateArtworkUI();
+  }catch{ $('savedArtworkSection').hidden=true; }
+}
+function thumbnailFor(image){
+  const canvas=document.createElement('canvas');canvas.width=canvas.height=128;
+  const context=canvas.getContext('2d');context.drawImage(image,0,0,128,128);
+  context.globalCompositeOperation='source-in';context.fillStyle='#6b8155';context.fillRect(0,0,128,128);
+  return canvas.toDataURL('image/png');
+}
+function activateArtwork(prepared,record,{useCustom=true,orientation=null}={}){
+  customSVG=prepared.markup;customImage=prepared.image;customRevision++;
+  activeArtwork={...record};artworkOrientation=normalizeOrientation(orientation);
+  if(useCustom)state.design='custom';
+  render();
+}
+async function importArtwork(file){
+  if(!file||deletingArtwork)return;
+  cancelRestoration();const sequence=++importSequence;
+  importPending=true;$('uploadPanel').setAttribute('aria-busy','true');$('export').disabled=true;
+  $('uploadStatus').textContent=`Opening ${file.name}…`;updateArtworkUI();
+  try{
+    if(file.size>SVG_IMPORT_MAX_BYTES)throw Error('Please choose an SVG smaller than 5 MB.');
+    const source=await file.text(),prepared=await prepareSVG(source);
     if(sequence!==importSequence)return;
-    customSVG=prepared.markup;customImage=prepared.image;customRevision++;
-    state.design='custom';render();
-    $('uploadStatus').textContent=`Loaded ${file.name}. Your artwork is fitted to the clock face. Custom uploads last for this session.`;
-    toast('Your SVG is ready. Its filled shapes and outlines form your clock face.');
+    const record={id:null,name:file.name,source,size:file.size,thumbnail:thumbnailFor(prepared.image)};
+    activateArtwork(prepared,record);
+    let saved=false;
+    try{
+      const stored=await saveSVG(record);
+      if(sequence!==importSequence){
+        if(activeArtwork&&!activeArtwork.id&&activeArtwork.source===stored.source){activeArtwork={...stored};updateArtworkUI();persist();}
+        refreshGallery();return;
+      }
+      activeArtwork={...stored};saved=true;
+    }catch(error){if(sequence!==importSequence)return;$('uploadStatus').textContent=`Loaded ${file.name}. ${error.message}`;}
+    if(sequence!==importSequence)return;
+    if(saved)$('uploadStatus').textContent=`Loaded ${activeArtwork.name}. Saved on this device for next time.`;
+    toast(saved?'Your SVG is ready and saved on this device.':'Your SVG is ready. It is available for this session only.');
+    refreshGallery();
   }catch(error){
     if(sequence!==importSequence)return;
     $('uploadStatus').textContent=`Couldn’t import ${file.name}: ${error.message}`;toast(error.message);
   }finally{
-    if(sequence===importSequence){importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;}
+    if(sequence===importSequence){importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;updateArtworkUI();persist();}
   }
+}
+async function loadSavedArtwork(id,{restoring=false,useCustom=true,orientation=null}={}){
+  if(deletingArtwork)return;
+  if(!restoring)cancelRestoration();const sequence=++importSequence;
+  importPending=true;$('uploadPanel').setAttribute('aria-busy','true');$('export').disabled=true;
+  $('uploadStatus').textContent='Opening saved SVG…';updateArtworkUI();
+  let recordRead=false;
+  try{
+    const record=await getSavedSVG(id);if(sequence!==importSequence)return;
+    if(!record){if(restoring)restoreReference=null;throw Error('This saved SVG is no longer available. Choose its original file to import it again.');}
+    recordRead=true;const prepared=await prepareSVG(record.source);if(sequence!==importSequence)return;
+    restoreReference=null;activateArtwork(prepared,record,{useCustom,orientation});
+    $('uploadStatus').textContent=`Loaded ${record.name}. Saved on this device.`;
+    if(useCustom)tab(true);
+  }catch(error){
+    if(sequence!==importSequence)return;
+    if(restoring&&recordRead)restoreReference=null;
+    $('uploadStatus').textContent=error.message;toast(error.message);
+  }finally{
+    if(sequence===importSequence){restorePending=false;importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;updateArtworkUI();persist();}
+  }
+}
+$('svgUpload').onchange=async event=>{const file=event.target.files[0];event.target.value='';await importArtwork(file);};
+$('svgDropZone').addEventListener('dragover',event=>{event.preventDefault();if(deletingArtwork)return;event.dataTransfer.dropEffect='copy';$('svgDropZone').classList.add('drag-active');});
+$('svgDropZone').addEventListener('dragleave',()=>$('svgDropZone').classList.remove('drag-active'));
+$('svgDropZone').addEventListener('drop',event=>{event.preventDefault();$('svgDropZone').classList.remove('drag-active');importArtwork(event.dataTransfer.files[0]);});
+// Files dropped outside the upload area should never navigate away from the editor.
+window.addEventListener('dragover',event=>{if([...event.dataTransfer.types].includes('Files'))event.preventDefault();});
+window.addEventListener('drop',event=>{if([...event.dataTransfer.types].includes('Files'))event.preventDefault();});
+$('replaceArtwork').onclick=()=>$('svgUpload').click();
+$('useArtwork').onclick=()=>{if(activeArtwork&&!importPending){state.design='custom';render();}};
+for(const [id,action]of[['artRotateLeft','left'],['artRotateRight','right'],['artMirrorX','mirrorX'],['artMirrorY','mirrorY'],['artResetOrientation','reset']])$(id).onclick=()=>{
+  if(!activeArtwork||importPending||deletingArtwork)return;
+  artworkOrientation=transformOrientation(artworkOrientation,action);state.design='custom';render();
+};
+$('removeArtwork').onclick=async()=>{
+  if(!activeArtwork||importPending||deletingArtwork)return;
+  const removed=activeArtwork;deletingArtwork=true;updateArtworkUI();
+  try{
+    if(removed.id)await deleteSavedSVG(removed.id);
+    activeArtwork=null;customSVG=customImage=null;customRevision++;restoreReference=null;artworkOrientation=normalizeOrientation(null);
+    if(state.design==='custom')state.design='petal';
+    $('uploadStatus').textContent=`Removed ${removed.name} from saved artwork.`;render();await refreshGallery();
+  }catch(error){toast(error.message);}
+  finally{deletingArtwork=false;updateArtworkUI();persist();}
 };
 // Keep the editor responsive while the mesh is built. If a host blocks workers,
 // retain a local fallback; the original outline is kept for that case.
@@ -154,8 +292,8 @@ function downloadClock(blob,settings,key){
 }
 $('cancelExport').onclick=()=>exportController?.abort();
 $('export').onclick=async()=>{
-  if(importPending||exportController||!validateDimensions(true))return;
-  const settings={...state},key=geometryKey(settings),image=customImage;
+  if(importPending||deletingArtwork||restorePending||exportController||!validateDimensions(true))return;
+  const settings={...state},key=geometryKey(settings),image=customImage,placement=[...artworkOrientation];
   if(exportCache?.key===key){downloadClock(exportCache.blob,settings,key);return;}
   const controller=new AbortController();exportController=controller;
   const button=$('export');button.disabled=true;button.textContent='Preparing your clock…';
@@ -166,7 +304,7 @@ $('export').onclick=async()=>{
     controller.signal.throwIfAborted();
     const n=Math.ceil(settings.diameter/.15),canvas=document.createElement('canvas');canvas.width=canvas.height=n;const ctx=canvas.getContext('2d',{willReadFrequently:true});
     ctx.scale(n/400,n/400);
-    if(settings.design==='custom')ctx.drawImage(image,0,0,400,400);else{ctx.fillStyle='#fff';ctx.fill(new Path2D(outlines.get(settings.design)));}
+    if(settings.design==='custom')drawPlacedArtwork(ctx,image,placement);else{ctx.fillStyle='#fff';ctx.fill(new Path2D(outlines.get(settings.design)));}
     const pixels=ctx.getImageData(0,0,n,n).data,alpha=new Uint8Array(n*n);
     for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
     controller.signal.throwIfAborted();
@@ -179,8 +317,13 @@ $('export').onclick=async()=>{
     if(error.name==='AbortError')toast('Download cancelled. Your design is still here.');
     else toast('Could not export: '+error.message);
   }finally{
-    exportController=null;button.disabled=importPending;button.innerHTML='Download STL <span>↓</span>';
+    exportController=null;button.disabled=importPending||deletingArtwork||restorePending;button.innerHTML='Download STL <span>↓</span>';
     $('exportProgress').hidden=true;$('printSection').setAttribute('aria-busy','false');
   }
 };
 render();view();
+refreshGallery();
+if(restoreReference){
+  const reference={...restoreReference};if(reference.useCustom)tab(true);
+  loadSavedArtwork(reference.id,{restoring:true,useCustom:reference.useCustom,orientation:reference.orientation});
+}

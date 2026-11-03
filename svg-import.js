@@ -1,6 +1,7 @@
 // Import self-contained SVG artwork without inserting its markup into the editor.
 // Geometry is measured in an isolated shadow root, then rendered to an alpha
 // silhouette shared by the preview and STL export.
+export const SVG_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 const SVG_RASTER_SIZE = 2048;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SVG_ELEMENTS = new Set(['svg','g','path','rect','circle','ellipse','polygon','polyline','line','defs','symbol','use','clipPath','mask','linearGradient','radialGradient','stop','pattern','text','tspan','textPath','image']);
@@ -24,7 +25,7 @@ function cleanStyle(source) {
 }
 
 function sanitizedSVG(source) {
-  if (typeof source !== 'string' || source.length > 1024 * 1024) throw Error('Please choose an SVG smaller than 1 MB.');
+  if (typeof source !== 'string' || source.length > SVG_IMPORT_MAX_BYTES || new TextEncoder().encode(source).byteLength > SVG_IMPORT_MAX_BYTES) throw Error('Please choose an SVG smaller than 5 MB.');
   const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
   if (doc.querySelector('parsererror') || doc.documentElement.localName !== 'svg') throw Error('This file isn’t a valid SVG.');
   const output = document.createElementNS(SVG_NS, 'svg');

@@ -2116,6 +2116,7 @@
   }
 
   // svg-import.js
+  var SVG_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
   var SVG_RASTER_SIZE = 2048;
   var SVG_NS = "http://www.w3.org/2000/svg";
   var SVG_ELEMENTS = /* @__PURE__ */ new Set(["svg", "g", "path", "rect", "circle", "ellipse", "polygon", "polyline", "line", "defs", "symbol", "use", "clipPath", "mask", "linearGradient", "radialGradient", "stop", "pattern", "text", "tspan", "textPath", "image"]);
@@ -2137,7 +2138,7 @@
     return result.join(";");
   }
   function sanitizedSVG(source) {
-    if (typeof source !== "string" || source.length > 1024 * 1024) throw Error("Please choose an SVG smaller than 1 MB.");
+    if (typeof source !== "string" || source.length > SVG_IMPORT_MAX_BYTES || new TextEncoder().encode(source).byteLength > SVG_IMPORT_MAX_BYTES) throw Error("Please choose an SVG smaller than 5 MB.");
     const doc = new DOMParser().parseFromString(source, "image/svg+xml");
     if (doc.querySelector("parsererror") || doc.documentElement.localName !== "svg") throw Error("This file isn’t a valid SVG.");
     const output = document.createElementNS(SVG_NS, "svg");
@@ -2300,6 +2301,240 @@
     image.src = dataURL;
     await image.decode();
     return { markup: `<image x="0" y="0" width="400" height="400" href="${dataURL}"/>`, image, svgText };
+  }
+
+  // svg-library.js
+  var DATABASE_NAME = "clock-factory-artwork";
+  var STORE_NAME = "svgs";
+  var MAX_SAVED_SVGS = 8;
+  var MAX_SOURCE_BYTES = 5 * 1024 * 1024;
+  var MAX_THUMBNAIL_BYTES = 512 * 1024;
+  var databasePromise = null;
+  var fallbackId = 0;
+  function storageError(error, action = "open") {
+    if (error?.name === "QuotaExceededError") return new Error("There isn’t enough storage on this device to save your SVG. Your current design is still available in this session.");
+    if (error?.name === "SecurityError" || error?.name === "InvalidStateError") return new Error("Saved artwork is unavailable in this browser. Your current design is still available in this session.");
+    return new Error(action === "delete" ? "The saved SVG couldn’t be removed. Please try again." : "Saved artwork couldn’t be opened or updated. Your current design is still available in this session.");
+  }
+  function openDatabase() {
+    if (databasePromise) return databasePromise;
+    let indexedDB;
+    try {
+      indexedDB = globalThis.indexedDB;
+    } catch (error) {
+      return Promise.reject(storageError(error));
+    }
+    if (!indexedDB) return Promise.reject(new Error("This browser cannot save SVG files locally. Your current design is still available in this session."));
+    const pending = new Promise((resolve, reject) => {
+      let settled = false, request;
+      try {
+        request = indexedDB.open(DATABASE_NAME, 1);
+      } catch (error) {
+        reject(storageError(error));
+        return;
+      }
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: "id" });
+      };
+      request.onblocked = () => {
+        settled = true;
+        reject(new Error("Close any older Clock Factory windows, then try saving your SVG again."));
+      };
+      request.onerror = () => {
+        settled = true;
+        reject(storageError(request.error));
+      };
+      request.onsuccess = () => {
+        const database = request.result;
+        if (settled) {
+          database.close();
+          return;
+        }
+        database.onversionchange = () => {
+          database.close();
+          if (databasePromise === pending) databasePromise = null;
+        };
+        database.onclose = () => {
+          if (databasePromise === pending) databasePromise = null;
+        };
+        settled = true;
+        resolve(database);
+      };
+    });
+    databasePromise = pending;
+    pending.catch(() => {
+      if (databasePromise === pending) databasePromise = null;
+    });
+    return pending;
+  }
+  function cleanName(name) {
+    const basename = typeof name === "string" ? name.split(/[\\/]/).at(-1) : "";
+    const text = basename.replace(/[\u0000-\u001f\u007f<>]/g, "").trim();
+    let result = "", length = 0;
+    for (const character of text) {
+      if (length++ === 255) break;
+      result += character;
+    }
+    return result || "Imported SVG.svg";
+  }
+  function validThumbnail(value) {
+    if (typeof value !== "string" || value.length > Math.ceil(MAX_THUMBNAIL_BYTES / 3) * 4 + 22 || !/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/.test(value)) return false;
+    const base64 = value.slice("data:image/png;base64,".length);
+    const bytes = base64.length * 3 / 4 - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
+    return base64.length % 4 === 0 && bytes <= MAX_THUMBNAIL_BYTES;
+  }
+  function checkedInput(input) {
+    if (!input || typeof input.source !== "string" || !input.source.trim()) throw new TypeError("Choose an SVG file before saving it.");
+    if (input.source.length > MAX_SOURCE_BYTES) throw new RangeError("Please choose an SVG smaller than 5 MB.");
+    const bytes = new TextEncoder().encode(input.source).byteLength;
+    if (bytes > MAX_SOURCE_BYTES) throw new RangeError("Please choose an SVG smaller than 5 MB.");
+    const size = input.size == null ? bytes : input.size;
+    if (!Number.isSafeInteger(size) || size < 1 || size > MAX_SOURCE_BYTES) throw new RangeError("The SVG file size must be between 1 byte and 5 MB.");
+    if (!validThumbnail(input.thumbnail)) throw new TypeError("The SVG thumbnail must be a PNG image smaller than 512 KB.");
+    return { name: cleanName(input.name), source: input.source, thumbnail: input.thumbnail, size };
+  }
+  function validRecord(record) {
+    return record && typeof record.id === "string" && record.id.length > 0 && record.id.length <= 128 && typeof record.source === "string" && record.source.length <= MAX_SOURCE_BYTES && typeof record.name === "string" && validThumbnail(record.thumbnail) && Number.isSafeInteger(record.size) && record.size > 0 && record.size <= MAX_SOURCE_BYTES && Number.isSafeInteger(record.updatedAt) && record.updatedAt > 0;
+  }
+  function metadata(record) {
+    return { id: record.id, name: cleanName(record.name), size: record.size, updatedAt: record.updatedAt, thumbnail: record.thumbnail };
+  }
+  function fullRecord(record) {
+    return { ...metadata(record), source: record.source };
+  }
+  async function transaction(mode, action, run) {
+    const database = await openDatabase();
+    return new Promise((resolve, reject) => {
+      let tx, result, failure;
+      try {
+        tx = database.transaction(STORE_NAME, mode);
+      } catch (error) {
+        reject(storageError(error, action));
+        return;
+      }
+      tx.oncomplete = () => resolve(result);
+      tx.onabort = () => reject(storageError(failure || tx.error, action));
+      tx.onerror = () => {
+      };
+      const setResult = (value) => {
+        result = value;
+      };
+      const abort = (error) => {
+        failure = error;
+        try {
+          tx.abort();
+        } catch {
+          reject(storageError(error, action));
+        }
+      };
+      try {
+        run(tx.objectStore(STORE_NAME), setResult, abort);
+      } catch (error) {
+        abort(error);
+      }
+    });
+  }
+  async function listSavedSVGs() {
+    return transaction("readonly", "open", (store, result, abort) => {
+      const request = store.getAll();
+      request.onsuccess = () => {
+        try {
+          result(request.result.filter(validRecord).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_SAVED_SVGS).map(metadata));
+        } catch (error) {
+          abort(error);
+        }
+      };
+    });
+  }
+  async function getSavedSVG(id) {
+    if (typeof id !== "string" || !id || id.length > 128) return null;
+    return transaction("readonly", "open", (store, result, abort) => {
+      const request = store.get(id);
+      request.onsuccess = () => {
+        try {
+          result(validRecord(request.result) ? fullRecord(request.result) : null);
+        } catch (error) {
+          abort(error);
+        }
+      };
+    });
+  }
+  async function saveSVG(input) {
+    const entry = checkedInput(input);
+    return transaction("readwrite", "save", (store, result, abort) => {
+      const request = store.getAll();
+      request.onsuccess = () => {
+        try {
+          const records = request.result.filter(validRecord);
+          const matching = records.find((record) => record.source === entry.source);
+          const ids = new Set(request.result.map((record) => record.id));
+          let id = matching?.id;
+          while (!id || !matching && ids.has(id)) id = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${fallbackId++}`;
+          const lastTime = Math.max(0, ...records.map((record) => record.updatedAt));
+          const updatedAt = Math.max(Date.now(), lastTime < Number.MAX_SAFE_INTEGER ? lastTime + 1 : 0);
+          const saved = { id, ...entry, updatedAt };
+          store.put(saved);
+          const retained = [saved, ...records.filter((record) => record.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt);
+          const keep = new Set(retained.slice(0, MAX_SAVED_SVGS).map((record) => record.id));
+          for (const record of request.result) if (!keep.has(record.id)) store.delete(record.id);
+          result(fullRecord(saved));
+        } catch (error) {
+          abort(error);
+        }
+      };
+    });
+  }
+  async function deleteSavedSVG(id) {
+    if (typeof id !== "string" || !id || id.length > 128) return false;
+    return transaction("readwrite", "delete", (store, result) => {
+      const request = store.getKey(id);
+      request.onsuccess = () => {
+        result(request.result !== void 0);
+        store.delete(id);
+      };
+    });
+  }
+
+  // svg-placement.js
+  var IDENTITY = [1, 0, 0, 1];
+  var OPERATIONS = {
+    left: [0, -1, 1, 0],
+    right: [0, 1, -1, 0],
+    mirrorX: [-1, 0, 0, 1],
+    mirrorY: [1, 0, 0, -1]
+  };
+  function normalizeOrientation(value) {
+    if (!Array.isArray(value) || value.length !== 4 || !value.every((number) => Number.isInteger(number) && Math.abs(number) <= 1)) return [...IDENTITY];
+    const [a, b, c, d] = value;
+    if (a * a + b * b !== 1 || c * c + d * d !== 1 || a * c + b * d !== 0) return [...IDENTITY];
+    return value.map((number) => number === 0 ? 0 : number);
+  }
+  function transformOrientation(current, action) {
+    if (action === "reset") return [...IDENTITY];
+    const operation = OPERATIONS[action];
+    if (!operation) throw new RangeError("Unknown artwork orientation action.");
+    const [a, b, c, d] = normalizeOrientation(current), [oa, ob, oc, od] = operation;
+    return normalizeOrientation([
+      oa * a + oc * b,
+      ob * a + od * b,
+      oa * c + oc * d,
+      ob * c + od * d
+    ]);
+  }
+  function placementTransform(matrix) {
+    return `translate(200 200) matrix(${normalizeOrientation(matrix).join(" ")} 0 0) translate(-200 -200)`;
+  }
+  function drawPlacedArtwork(context, image, matrix) {
+    const [a, b, c, d] = normalizeOrientation(matrix);
+    context.save();
+    try {
+      context.translate(200, 200);
+      context.transform(a, b, c, d, 0, 0);
+      context.translate(-200, -200);
+      context.drawImage(image, 0, 0, 400, 400);
+    } finally {
+      context.restore();
+    }
   }
 
   // mesh.js
@@ -3361,17 +3596,31 @@
   var colors = [["Terracotta", "#c47f62"], ["Oat milk", "#dfd5bd"], ["Sage", "#94a18a"], ["Forest", "#485c48"], ["Ink", "#434643"], ["Lavender", "#aaa0b5"], ["Dusty rose", "#c99d99"]];
   var initial = { design: "petal", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true };
   var state = { ...initial };
+  var artworkOrientation = normalizeOrientation(null);
+  var restoreReference = null;
+  var restorePending = false;
   try {
     const saved = JSON.parse(localStorage.getItem("clock-factory") || "null");
-    if (saved && designs.some((d) => d.id === saved.design) && Number.isInteger(saved.color) && colors[saved.color] && ["smooth", "ripple", "grain"].includes(saved.texture)) {
-      state = { design: saved.design, color: saved.color, texture: saved.texture, markers: typeof saved.markers === "boolean" ? saved.markers : true };
+    const artworkId = typeof saved?.artworkId === "string" && saved.artworkId.length <= 128 ? saved.artworkId : null;
+    const validDesign = saved && (designs.some((d) => d.id === saved.design) || saved.design === "custom" && artworkId);
+    if (validDesign && Number.isInteger(saved.color) && colors[saved.color] && ["smooth", "ripple", "grain"].includes(saved.texture)) {
+      state = { design: saved.design === "custom" ? "petal" : saved.design, color: saved.color, texture: saved.texture, markers: typeof saved.markers === "boolean" ? saved.markers : true };
       for (const [key, min, max, step] of [["diameter", 100, 300, 10], ["thickness", 2, 10, 0.5], ["hole", 5, 15, 0.5]]) {
         const value = Number(saved[key]);
         state[key] = Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value / step) * step)) : initial[key];
       }
+      artworkOrientation = normalizeOrientation(saved.artworkOrientation);
+      if (artworkId) {
+        restoreReference = { id: artworkId, useCustom: saved.design === "custom", orientation: [...artworkOrientation] };
+        restorePending = true;
+      }
     }
   } catch {
   }
+  var activeArtwork = null;
+  var gallerySequence = 0;
+  var deletingArtwork = false;
+  var settingsSaved = true;
   var customSVG = null;
   var customImage = null;
   var customRevision = 0;
@@ -3390,7 +3639,7 @@
   var lastDownloadKey = null;
   var exportController = null;
   function geometryKey(settings = state) {
-    return JSON.stringify([settings.design, settings.design === "custom" ? customRevision : null, settings.diameter, settings.thickness, settings.hole, settings.texture, settings.markers]);
+    return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation] : null, settings.diameter, settings.thickness, settings.hole, settings.texture, settings.markers]);
   }
   function toast(message) {
     $("toast").textContent = message;
@@ -3398,13 +3647,23 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => $("toast").classList.remove("visible"), 4e3);
   }
+  function updateSaveLabel() {
+    document.querySelector(".local-status").textContent = restorePending ? "Opening saved SVG…" : importPending ? "Saving SVG…" : !settingsSaved ? "Session only" : activeArtwork && !activeArtwork.id ? "SVG: session only" : "Saved on this device";
+  }
   function flushSave() {
     clearTimeout(saveTimer);
+    if (restorePending) return;
+    const reference = activeArtwork?.id || restoreReference?.id || null;
+    let design = state.design;
+    if (design === "custom" && !reference) design = "petal";
+    if (restoreReference?.useCustom && !activeArtwork) design = "custom";
     try {
-      localStorage.setItem("clock-factory", JSON.stringify({ ...state, design: state.design === "custom" ? "petal" : state.design }));
+      localStorage.setItem("clock-factory", JSON.stringify({ ...state, design, artworkId: reference, artworkOrientation }));
+      settingsSaved = true;
     } catch {
-      document.querySelector(".local-status").textContent = "Session only";
+      settingsSaved = false;
     }
+    updateSaveLabel();
   }
   function persist() {
     clearTimeout(saveTimer);
@@ -3415,11 +3674,11 @@
     if (document.hidden) flushSave();
   });
   function faceMarkup() {
-    return customSVG && state.design === "custom" ? customSVG : `<path d="${outlines.get(state.design)}"/>`;
+    return customSVG && state.design === "custom" ? `<g transform="${placementTransform(artworkOrientation)}">${customSVG}</g>` : `<path d="${outlines.get(state.design) || outlines.get("petal")}"/>`;
   }
   function render({ forceInputs = false } = {}) {
     const color = colors[state.color][1];
-    const nextPreviewKey = JSON.stringify([state.design, state.color, state.texture, state.markers, customRevision]);
+    const nextPreviewKey = JSON.stringify([state.design, state.color, state.texture, state.markers, customRevision, artworkOrientation]);
     if (nextPreviewKey !== previewKey) {
       let ticks = "";
       if (state.markers) for (let i = 0; i < 12; i++) ticks += `<rect x="197.5" y="76" width="5" height="${i % 3 === 0 ? 17 : 10}" rx="2" transform="rotate(${i * 30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
@@ -3459,6 +3718,7 @@
     $("designTitle").innerHTML = d ? `The ${d.name} Clock <span>↗</span>` : "Your Custom Clock <span>↗</span>";
     $("designDescription").textContent = d?.description || "Your own shape. Your own sense of time.";
     $("clockObject").style.filter = `drop-shadow(3px ${Math.round(state.thickness * 1.5)}px 0 ${color} ) drop-shadow(9px 19px 12px #726b4f30)`;
+    updateArtworkUI();
     persist();
   }
   designs.forEach((d) => {
@@ -3467,6 +3727,7 @@
     b.dataset.design = d.id;
     b.innerHTML = `<svg viewBox="0 0 400 400" aria-hidden="true"><path d="${outlines.get(d.id)}" fill="${d.id === "petal" ? "#bf977b" : "#c5c9b6"}"/><path d="M200 130V200L245 227" fill="none" stroke="#f7f5e9" stroke-width="10" stroke-linecap="round"/></svg>${d.name}`;
     b.onclick = () => {
+      cancelRestoration();
       state.design = d.id;
       render();
     };
@@ -3602,7 +3863,11 @@
   }, { passive: false });
   $("reset").onclick = () => {
     importSequence++;
+    restorePending = false;
+    restoreReference = null;
     importPending = false;
+    activeArtwork = null;
+    artworkOrientation = normalizeOrientation(null);
     $("uploadPanel").setAttribute("aria-busy", "false");
     $("export").disabled = !!exportController;
     exportController?.abort();
@@ -3616,30 +3881,136 @@
     $("restoreView").click();
     render({ forceInputs: true });
     validateDimensions();
-    toast("A fresh start. Make something yours.");
+    toast("A fresh start. Your saved SVGs are still available.");
   };
   $("help").onclick = () => $("helpDialog").showModal();
   $("closeHelp").onclick = $("gotIt").onclick = () => $("helpDialog").close();
-  $("svgUpload").onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    e.target.value = "";
+  function cancelRestoration() {
+    if (!restorePending && !restoreReference && !importPending) return;
+    const wasLoading = importPending || restorePending;
+    importSequence++;
+    restorePending = false;
+    restoreReference = null;
+    importPending = false;
+    $("uploadPanel").setAttribute("aria-busy", "false");
+    $("export").disabled = !!exportController;
+    if (wasLoading) $("uploadStatus").textContent = "SVG loading cancelled.";
+    updateSaveLabel();
+  }
+  function updateArtworkUI() {
+    const busy = importPending || deletingArtwork;
+    $("export").disabled = busy || restorePending || !!exportController;
+    $("artworkCard").hidden = !activeArtwork;
+    $("svgDropZone").classList.toggle("has-artwork", !!activeArtwork);
+    $("artworkCard").setAttribute("aria-busy", String(busy));
+    $("svgUpload").disabled = deletingArtwork;
+    $("svgDropZone").setAttribute("aria-disabled", String(deletingArtwork));
+    if (activeArtwork) {
+      $("artworkName").textContent = activeArtwork.name;
+      $("artworkName").title = activeArtwork.name;
+      $("artworkThumbnail").src = activeArtwork.thumbnail;
+      $("artworkThumbnail").style.transform = `matrix(${artworkOrientation.join(",")},0,0)`;
+      $("artworkDetails").textContent = `SVG · ${activeArtwork.size < 1024 * 1024 ? Math.max(1, Math.round(activeArtwork.size / 1024)) + " KB" : (activeArtwork.size / (1024 * 1024)).toFixed(1) + " MB"}`;
+      $("artworkSavedStatus").textContent = busy ? "Saving…" : activeArtwork.id ? "Saved on this device" : "Session only — SVG not saved";
+      $("artworkSavedStatus").classList.toggle("session-only", !busy && !activeArtwork.id);
+      $("useArtwork").hidden = state.design === "custom";
+    }
+    for (const id of ["useArtwork", "replaceArtwork", "removeArtwork", "artRotateLeft", "artRotateRight", "artMirrorX", "artMirrorY", "artResetOrientation"]) $(id).disabled = busy;
+    for (const button of $("savedArtworks").querySelectorAll("button")) {
+      button.disabled = deletingArtwork;
+      button.classList.toggle("selected", button.dataset.artworkId === activeArtwork?.id);
+    }
+    updateSaveLabel();
+  }
+  async function refreshGallery() {
+    const sequence = ++gallerySequence;
+    try {
+      const entries = await listSavedSVGs();
+      if (sequence !== gallerySequence) return;
+      $("savedArtworks").replaceChildren();
+      $("savedArtworkSection").hidden = !entries.length;
+      for (const entry of entries) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.artworkId = entry.id;
+        button.title = entry.name;
+        button.setAttribute("aria-label", `Use saved SVG: ${entry.name}`);
+        const image = document.createElement("img");
+        image.src = entry.thumbnail;
+        image.alt = "";
+        image.width = image.height = 53;
+        const name = document.createElement("span");
+        name.textContent = entry.name;
+        button.append(image, name);
+        button.onclick = () => {
+          if (entry.id === activeArtwork?.id && !importPending) {
+            state.design = "custom";
+            render();
+          } else loadSavedArtwork(entry.id);
+        };
+        $("savedArtworks").append(button);
+      }
+      updateArtworkUI();
+    } catch {
+      $("savedArtworkSection").hidden = true;
+    }
+  }
+  function thumbnailFor(image) {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 128;
+    const context = canvas.getContext("2d");
+    context.drawImage(image, 0, 0, 128, 128);
+    context.globalCompositeOperation = "source-in";
+    context.fillStyle = "#6b8155";
+    context.fillRect(0, 0, 128, 128);
+    return canvas.toDataURL("image/png");
+  }
+  function activateArtwork(prepared, record, { useCustom = true, orientation = null } = {}) {
+    customSVG = prepared.markup;
+    customImage = prepared.image;
+    customRevision++;
+    activeArtwork = { ...record };
+    artworkOrientation = normalizeOrientation(orientation);
+    if (useCustom) state.design = "custom";
+    render();
+  }
+  async function importArtwork(file) {
+    if (!file || deletingArtwork) return;
+    cancelRestoration();
     const sequence = ++importSequence;
     importPending = true;
     $("uploadPanel").setAttribute("aria-busy", "true");
     $("export").disabled = true;
     $("uploadStatus").textContent = `Opening ${file.name}…`;
+    updateArtworkUI();
     try {
-      if (file.size > 1024 * 1024) throw Error("Please choose an SVG smaller than 1 MB.");
-      const prepared = await prepareSVG(await file.text());
+      if (file.size > SVG_IMPORT_MAX_BYTES) throw Error("Please choose an SVG smaller than 5 MB.");
+      const source = await file.text(), prepared = await prepareSVG(source);
       if (sequence !== importSequence) return;
-      customSVG = prepared.markup;
-      customImage = prepared.image;
-      customRevision++;
-      state.design = "custom";
-      render();
-      $("uploadStatus").textContent = `Loaded ${file.name}. Your artwork is fitted to the clock face. Custom uploads last for this session.`;
-      toast("Your SVG is ready. Its filled shapes and outlines form your clock face.");
+      const record = { id: null, name: file.name, source, size: file.size, thumbnail: thumbnailFor(prepared.image) };
+      activateArtwork(prepared, record);
+      let saved = false;
+      try {
+        const stored = await saveSVG(record);
+        if (sequence !== importSequence) {
+          if (activeArtwork && !activeArtwork.id && activeArtwork.source === stored.source) {
+            activeArtwork = { ...stored };
+            updateArtworkUI();
+            persist();
+          }
+          refreshGallery();
+          return;
+        }
+        activeArtwork = { ...stored };
+        saved = true;
+      } catch (error) {
+        if (sequence !== importSequence) return;
+        $("uploadStatus").textContent = `Loaded ${file.name}. ${error.message}`;
+      }
+      if (sequence !== importSequence) return;
+      if (saved) $("uploadStatus").textContent = `Loaded ${activeArtwork.name}. Saved on this device for next time.`;
+      toast(saved ? "Your SVG is ready and saved on this device." : "Your SVG is ready. It is available for this session only.");
+      refreshGallery();
     } catch (error) {
       if (sequence !== importSequence) return;
       $("uploadStatus").textContent = `Couldn’t import ${file.name}: ${error.message}`;
@@ -3649,7 +4020,109 @@
         importPending = false;
         $("uploadPanel").setAttribute("aria-busy", "false");
         $("export").disabled = !!exportController;
+        updateArtworkUI();
+        persist();
       }
+    }
+  }
+  async function loadSavedArtwork(id, { restoring = false, useCustom = true, orientation = null } = {}) {
+    if (deletingArtwork) return;
+    if (!restoring) cancelRestoration();
+    const sequence = ++importSequence;
+    importPending = true;
+    $("uploadPanel").setAttribute("aria-busy", "true");
+    $("export").disabled = true;
+    $("uploadStatus").textContent = "Opening saved SVG…";
+    updateArtworkUI();
+    let recordRead = false;
+    try {
+      const record = await getSavedSVG(id);
+      if (sequence !== importSequence) return;
+      if (!record) {
+        if (restoring) restoreReference = null;
+        throw Error("This saved SVG is no longer available. Choose its original file to import it again.");
+      }
+      recordRead = true;
+      const prepared = await prepareSVG(record.source);
+      if (sequence !== importSequence) return;
+      restoreReference = null;
+      activateArtwork(prepared, record, { useCustom, orientation });
+      $("uploadStatus").textContent = `Loaded ${record.name}. Saved on this device.`;
+      if (useCustom) tab(true);
+    } catch (error) {
+      if (sequence !== importSequence) return;
+      if (restoring && recordRead) restoreReference = null;
+      $("uploadStatus").textContent = error.message;
+      toast(error.message);
+    } finally {
+      if (sequence === importSequence) {
+        restorePending = false;
+        importPending = false;
+        $("uploadPanel").setAttribute("aria-busy", "false");
+        $("export").disabled = !!exportController;
+        updateArtworkUI();
+        persist();
+      }
+    }
+  }
+  $("svgUpload").onchange = async (event) => {
+    const file = event.target.files[0];
+    event.target.value = "";
+    await importArtwork(file);
+  };
+  $("svgDropZone").addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (deletingArtwork) return;
+    event.dataTransfer.dropEffect = "copy";
+    $("svgDropZone").classList.add("drag-active");
+  });
+  $("svgDropZone").addEventListener("dragleave", () => $("svgDropZone").classList.remove("drag-active"));
+  $("svgDropZone").addEventListener("drop", (event) => {
+    event.preventDefault();
+    $("svgDropZone").classList.remove("drag-active");
+    importArtwork(event.dataTransfer.files[0]);
+  });
+  window.addEventListener("dragover", (event) => {
+    if ([...event.dataTransfer.types].includes("Files")) event.preventDefault();
+  });
+  window.addEventListener("drop", (event) => {
+    if ([...event.dataTransfer.types].includes("Files")) event.preventDefault();
+  });
+  $("replaceArtwork").onclick = () => $("svgUpload").click();
+  $("useArtwork").onclick = () => {
+    if (activeArtwork && !importPending) {
+      state.design = "custom";
+      render();
+    }
+  };
+  for (const [id, action] of [["artRotateLeft", "left"], ["artRotateRight", "right"], ["artMirrorX", "mirrorX"], ["artMirrorY", "mirrorY"], ["artResetOrientation", "reset"]]) $(id).onclick = () => {
+    if (!activeArtwork || importPending || deletingArtwork) return;
+    artworkOrientation = transformOrientation(artworkOrientation, action);
+    state.design = "custom";
+    render();
+  };
+  $("removeArtwork").onclick = async () => {
+    if (!activeArtwork || importPending || deletingArtwork) return;
+    const removed = activeArtwork;
+    deletingArtwork = true;
+    updateArtworkUI();
+    try {
+      if (removed.id) await deleteSavedSVG(removed.id);
+      activeArtwork = null;
+      customSVG = customImage = null;
+      customRevision++;
+      restoreReference = null;
+      artworkOrientation = normalizeOrientation(null);
+      if (state.design === "custom") state.design = "petal";
+      $("uploadStatus").textContent = `Removed ${removed.name} from saved artwork.`;
+      render();
+      await refreshGallery();
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      deletingArtwork = false;
+      updateArtworkUI();
+      persist();
     }
   };
   function meshAsync(alpha, n, settings, signal) {
@@ -3724,8 +4197,8 @@
   }
   $("cancelExport").onclick = () => exportController?.abort();
   $("export").onclick = async () => {
-    if (importPending || exportController || !validateDimensions(true)) return;
-    const settings = { ...state }, key = geometryKey(settings), image = customImage;
+    if (importPending || deletingArtwork || restorePending || exportController || !validateDimensions(true)) return;
+    const settings = { ...state }, key = geometryKey(settings), image = customImage, placement = [...artworkOrientation];
     if (exportCache?.key === key) {
       downloadClock(exportCache.blob, settings, key);
       return;
@@ -3745,7 +4218,7 @@
       canvas.width = canvas.height = n;
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       ctx.scale(n / 400, n / 400);
-      if (settings.design === "custom") ctx.drawImage(image, 0, 0, 400, 400);
+      if (settings.design === "custom") drawPlacedArtwork(ctx, image, placement);
       else {
         ctx.fillStyle = "#fff";
         ctx.fill(new Path2D(outlines.get(settings.design)));
@@ -3764,7 +4237,7 @@
       else toast("Could not export: " + error.message);
     } finally {
       exportController = null;
-      button.disabled = importPending;
+      button.disabled = importPending || deletingArtwork || restorePending;
       button.innerHTML = "Download STL <span>↓</span>";
       $("exportProgress").hidden = true;
       $("printSection").setAttribute("aria-busy", "false");
@@ -3772,6 +4245,12 @@
   };
   render();
   view();
+  refreshGallery();
+  if (restoreReference) {
+    const reference = { ...restoreReference };
+    if (reference.useCustom) tab(true);
+    loadSavedArtwork(reference.id, { restoring: true, useCustom: reference.useCustom, orientation: reference.orientation });
+  }
 })();
 /*! Bundled license information:
 
