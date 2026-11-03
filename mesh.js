@@ -1,6 +1,7 @@
 import clipping from 'polygon-clipping';
 import { traceContours, simplifyRing } from './contours.js';
 import { extrudeLayers } from './mesh-extrusion.js';
+import { hourNumeralPolygons } from './hour-numerals.js';
 
 const CURVE_ERROR = .02;
 const snap = value => Math.round(value*1e6)/1e6;
@@ -117,16 +118,26 @@ export function buildClockLayers(alpha,n,settings,progress=()=>{}) {
   const rimPixels=Math.max(1,Math.ceil(.3/frame.scale));
   const detailOutline=silhouette(insetAlpha(alpha,n,rimPixels),n,diameter,frame).polygons;
   const detailRegion=detailOutline.length?clipping.difference(detailOutline,[[circle(hole/2+.3,.001,128)]]):[];
-  const markerShapes=markers?markerPolygons(diameter):[];
+  const useNumerals=['arabic','roman'].includes(settings.hourStyle);
+  const markerShapes=markers?(useNumerals?hourNumeralPolygons(settings):markerPolygons(diameter)):[];
   const markerOutline=markers?silhouette(insetAlpha(alpha,n,rimPixels+1),n,diameter,frame).polygons:[];
   const markerRegion=markerOutline.length?clipping.difference(markerOutline,[[circle(hole/2+.3+frame.scale,.001,128)]]):[];
   const ticks=markers&&markerRegion.length?clipping.intersection(markerRegion,markerShapes):[];
   if(texture!=='smooth'){
-    const pattern=texture==='ripple'?ripplePolygons(diameter):hatchPolygons(diameter);
+    let pattern=texture==='ripple'?ripplePolygons(diameter):hatchPolygons(diameter);
     // Union the patterns before clipping them to the face. Unioning separately
     // clipped patterns can produce nearly coincident perimeter edges.
-    const foundation=markers?clipping.union(pattern,markerPolygons(diameter,.15)):pattern;
-    const first=detailRegion.length?clipping.intersection(detailRegion,foundation):[];
+    let first=[];
+    if(useNumerals&&markers){
+      // Keep a clean halo around the lettering. Texture cannot intersect or
+      // touch a glyph stroke, which also keeps small numerals legible in print.
+      pattern=clipping.difference(pattern,hourNumeralPolygons(settings,.6));
+      const textureArea=detailRegion.length?clipping.intersection(detailRegion,pattern):[];
+      first=textureArea.length&&ticks.length?clipping.union(textureArea,ticks):ticks.length?ticks:textureArea;
+    }else{
+      const foundation=markers?clipping.union(pattern,markerPolygons(diameter,.15)):pattern;
+      first=detailRegion.length?clipping.intersection(detailRegion,foundation):[];
+    }
     if(first.length)layers.push({height:thickness+.4,polygons:first});
   }
   if(ticks.length)layers.push({height:thickness+.8,polygons:ticks});

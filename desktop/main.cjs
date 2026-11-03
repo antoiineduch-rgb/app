@@ -62,14 +62,15 @@ if (!app.requestSingleInstanceLock()) {
       callback({ cancel: !allowed });
     });
     appSession.on('will-download', (event, item) => {
-      if (!item.getURL().startsWith('blob:clock://studio/') || !item.getFilename().endsWith('.stl')) {
+      const extension=item.getFilename().match(/\.(stl|3mf)$/i)?.[1].toLowerCase();
+      if (!item.getURL().startsWith('blob:clock://studio/') || !extension) {
         event.preventDefault();
         return;
       }
       item.setSaveDialogOptions({
         title: 'Save your clock face',
         defaultPath: join(app.getPath('downloads'), item.getFilename()),
-        filters: [{ name: '3D printable clock face', extensions: ['stl'] }],
+        filters: [{ name: extension==='3mf'?'3MF clock model':'STL clock mesh', extensions: [extension] }],
       });
     });
     app.setAboutPanelOptions({

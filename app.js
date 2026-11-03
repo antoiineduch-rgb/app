@@ -3,9 +3,11 @@ import { prepareSVG, SVG_IMPORT_MAX_BYTES } from './svg-import.js';
 import { listSavedSVGs, getSavedSVG, saveSVG, deleteSavedSVG } from './svg-library.js';
 import { normalizeOrientation, transformOrientation, placementTransform, drawPlacedArtwork } from './svg-placement.js';
 import { makeClockSTL } from './mesh.js';
+import { hourNumeralMarkup } from './hour-numerals.js';
+import { stlTo3MF } from './export-3mf.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
-const initial={design:'petal',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true};
+const initial={design:'petal',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true,hourStyle:'ticks',numberSize:100,numberPosition:100,exportFormat:'stl'};
 let state={...initial};
 let artworkOrientation=normalizeOrientation(null),restoreReference=null,restorePending=false;
 try{
@@ -13,8 +15,8 @@ try{
   const artworkId=typeof saved?.artworkId==='string'&&saved.artworkId.length<=128?saved.artworkId:null;
   const validDesign=saved&&(designs.some(d=>d.id===saved.design)||(saved.design==='custom'&&artworkId));
   if(validDesign&&Number.isInteger(saved.color)&&colors[saved.color]&&['smooth','ripple','grain'].includes(saved.texture)){
-    state={design:saved.design==='custom'?'petal':saved.design,color:saved.color,texture:saved.texture,markers:typeof saved.markers==='boolean'?saved.markers:true};
-    for(const [key,min,max,step]of[['diameter',100,300,10],['thickness',2,10,.5],['hole',5,15,.5]]){
+    state={design:saved.design==='custom'?'petal':saved.design,color:saved.color,texture:saved.texture,markers:typeof saved.markers==='boolean'?saved.markers:true,hourStyle:['ticks','arabic','roman'].includes(saved.hourStyle)?saved.hourStyle:'ticks',exportFormat:saved.exportFormat==='3mf'?'3mf':'stl'};
+    for(const [key,min,max,step]of[['diameter',100,300,10],['thickness',2,10,.5],['hole',5,15,.5],['numberSize',70,130,5],['numberPosition',80,120,5]]){
       const value=Number(saved[key]);state[key]=Number.isFinite(value)?Math.min(max,Math.max(min,Math.round(value/step)*step)):initial[key];
     }
     artworkOrientation=normalizeOrientation(saved.artworkOrientation);
@@ -25,8 +27,9 @@ let activeArtwork=null,gallerySequence=0,deletingArtwork=false,settingsSaved=tru
 let customSVG=null,customImage=null,customRevision=0,importSequence=0,importPending=false,zoom=1,rx=12,ry=-19,rz=-7;
 const outlines=new Map(designs.map(d=>[d.id,shapePath(d.id)]));
 const workerURL=new URL('./export-worker.js',document.currentScript?.src||location.href);
-let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null;
-function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation]:null,settings.diameter,settings.thickness,settings.hole,settings.texture,settings.markers]);}
+let toastTimer,saveTimer,previewKey='',exportCache=null,meshCache=null,lastDownloadKey=null,exportController=null;
+function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation]:null,settings.diameter,settings.thickness,settings.hole,settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null]);}
+function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?colors[settings.color][1]:null]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
 function updateSaveLabel(){
   document.querySelector('.local-status').textContent=restorePending?'Opening saved SVG…':importPending?'Saving SVG…':!settingsSaved?'Session only':activeArtwork&&!activeArtwork.id?'SVG: session only':'Saved on this device';
@@ -47,11 +50,12 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)flushSave()
 function faceMarkup(){return customSVG&&state.design==='custom'?`<g transform="${placementTransform(artworkOrientation)}">${customSVG}</g>`:`<path d="${outlines.get(state.design)||outlines.get('petal')}"/>`;}
 function render({forceInputs=false}={}){
   const color=colors[state.color][1];
-  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,customRevision,artworkOrientation]);
+  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,state.hourStyle,state.numberSize,state.numberPosition,customRevision,artworkOrientation]);
   if(nextPreviewKey!==previewKey){
-  let ticks='';
-  if(state.markers)for(let i=0;i<12;i++)ticks+=`<rect x="197.5" y="76" width="5" height="${i%3===0?17:10}" rx="2" transform="rotate(${i*30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
-  $('clockSvg').innerHTML=`<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask><pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/>${state.texture==='ripple'?Array.from({length:44},(_,i)=>`<circle cx="200" cy="200" r="${12+i*4}" fill="none" stroke="${i%2?'#fff0da':'#774832'}" stroke-opacity="${i%2?'.18':'.23'}" stroke-width=".8"/>`).join(''):state.texture==='grain'?'<rect width="400" height="400" fill="url(#ridges)"/>':''}<rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
+  let ticks='',numberClearance='';
+  if(state.markers&&state.hourStyle!=='ticks'){ticks=`<g id="hourNumerals" fill="#f5e5cd">${hourNumeralMarkup(state)}</g>`;numberClearance=`<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2*400/state.diameter}" stroke-linejoin="round">${hourNumeralMarkup(state)}</g></mask>`;}
+  if(state.markers&&state.hourStyle==='ticks')for(let i=0;i<12;i++)ticks+=`<rect x="197.5" y="76" width="5" height="${i%3===0?17:10}" rx="2" transform="rotate(${i*30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
+  $('clockSvg').innerHTML=`<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance?' mask="url(#numberClearanceMask)"':''}>${state.texture==='ripple'?Array.from({length:44},(_,i)=>`<circle cx="200" cy="200" r="${12+i*4}" fill="none" stroke="${i%2?'#fff0da':'#774832'}" stroke-opacity="${i%2?'.18':'.23'}" stroke-width=".8"/>`).join(''):state.texture==='grain'?'<rect width="400" height="400" fill="url(#ridges)"/>':''}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
   previewKey=nextPreviewKey;
   }
   document.querySelectorAll('.design-card').forEach(b=>{b.classList.toggle('selected',b.dataset.design===state.design);b.setAttribute('aria-pressed',b.dataset.design===state.design);});
@@ -66,7 +70,11 @@ function render({forceInputs=false}={}){
   $('exportSize').textContent=`${state.diameter} mm across · ${state.thickness} mm thick`;
   $('sizeHint').textContent=`${state.diameter/10} cm across — ${state.diameter<=160?'a compact clock for a shelf or desk.':state.diameter<=220?'a lovely size for a desk or small wall.':'a statement piece for your wall. Check your printer’s bed size.'}`;
   document.querySelectorAll('[data-size]').forEach(b=>{const active=Number(b.dataset.size)===state.diameter;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',active);});
-  $('downloadGuide').hidden=lastDownloadKey!==geometryKey();
+  $('downloadGuide').hidden=lastDownloadKey!==fileKey();
+  $('hourStyle').value=state.hourStyle;$('hourStyle').disabled=!state.markers;
+  $('numeralOptions').hidden=!state.markers||state.hourStyle==='ticks';
+  for(const id of ['numberSize','numberPosition']){$(id).value=state[id];$(id+'Value').textContent=state[id];}
+  updateExportFormatUI();
   const d=designs.find(d=>d.id===state.design);
   $('designTitle').innerHTML=d?`The ${d.name} Clock <span>↗</span>`:'Your Custom Clock <span>↗</span>';
   $('designDescription').textContent=d?.description||'Your own shape. Your own sense of time.';
@@ -96,6 +104,19 @@ function validateDimensions(focus=false){
   }
   validateDimensions();render();
 }));
+for(const id of ['hourStyle','exportFormat'])$(id).addEventListener('change',()=>{
+  const value=$(id).value,allowed=id==='hourStyle'?['ticks','arabic','roman']:['stl','3mf'];
+  if(!allowed.includes(value))return;state[id]=value;render();
+});
+for(const id of ['numberSize','numberPosition'])$(id).addEventListener('input',()=>{
+  if(!$(id).validity.valid)return;state[id]=Number($(id).value);render();
+});
+function updateExportFormatUI(){
+  const format=state.exportFormat.toUpperCase();$('exportFormat').value=state.exportFormat;
+  $('exportType').textContent=`${format} file`;
+  $('exportFormatHint').textContent=state.exportFormat==='3mf'?'3MF includes the mesh, millimeter units, and selected face color.':'STL exports the printable mesh. Colors are a filament preview.';
+  if(!exportController)$('export').innerHTML=`Download ${format} <span>↓</span>`;
+}
 for(const id of ['thickness','hole'])$(id).addEventListener('blur',()=>{if(validateDimensions()){delete $(id).dataset.editing;$(id).value=state[id];}});
 function tab(upload){$('uploadPanel').hidden=!upload;$('presetPanel').hidden=upload;for(const [id,active]of[['uploadTab',upload],['presetsTab',!upload]]){$(id).classList.toggle('selected',active);$(id).setAttribute('aria-selected',active);}}
 document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{state.diameter=Number(b.dataset.size);render();});
@@ -256,7 +277,7 @@ $('removeArtwork').onclick=async()=>{
 };
 // Keep the editor responsive while the mesh is built. If a host blocks workers,
 // retain a local fallback; the original outline is kept for that case.
-function meshAsync(alpha,n,settings,signal){
+function meshAsync(alpha,n,settings,signal,cachedSTL=null){
   return new Promise((resolve,reject)=>{
     let worker=null,timer=null,settled=false,fallingBack=false;
     const clean=()=>{clearTimeout(timer);worker?.terminate();signal.removeEventListener('abort',abort);};
@@ -264,7 +285,7 @@ function meshAsync(alpha,n,settings,signal){
     const abort=()=>finish(new DOMException('Export cancelled','AbortError'));
     const fallback=()=>{
       if(settled||fallingBack)return;fallingBack=true;clearTimeout(timer);worker?.terminate();
-      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();finish(null,makeClockSTL(alpha,n,settings));}catch(error){finish(error);}},0);
+      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();const mesh=cachedSTL||makeClockSTL(alpha,n,settings);const buffer=settings.exportFormat==='3mf'?stlTo3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor}):mesh;finish(null,{buffer,stlBuffer:mesh});}catch(error){finish(error);}},0);
     };
     signal.addEventListener('abort',abort,{once:true});
     if(signal.aborted){abort();return;}
@@ -273,27 +294,27 @@ function meshAsync(alpha,n,settings,signal){
       worker.onmessage=({data})=>{
         if(data.id!==1||settled)return;
         if(data.error){finish(new Error(data.error));return;}
-        if(data.stage)$('exportStatus').textContent=data.stage==='outline'?'Smoothing your outline…':data.stage==='details'?'Adding your surface details…':'Finishing your print file…';
-        if(data.buffer)finish(null,data.buffer);
+        if(data.stage)$('exportStatus').textContent=data.stage==='outline'?'Smoothing your outline…':data.stage==='details'?'Adding your surface details…':data.stage==='package'?'Preparing your 3MF file…':'Finishing your print file…';
+        if(data.buffer)finish(null,{buffer:data.buffer,stlBuffer:data.stlBuffer||data.buffer});
       };
       worker.onerror=event=>{event.preventDefault();fallback();};
-      const copy=alpha.buffer.slice(0);
-      worker.postMessage({id:1,alpha:copy,n,settings},[copy]);
+      const copy=(cachedSTL||alpha.buffer).slice(0);
+      worker.postMessage({id:1,...(cachedSTL?{stlBuffer:copy}:{alpha:copy}),n,settings},[copy]);
       timer=setTimeout(fallback,60000);
     }catch{fallback();}
   });
 }
 function downloadClock(blob,settings,key){
   const url=URL.createObjectURL(blob),link=document.createElement('a');
-  link.href=url;link.download=`clock-factory-${settings.design}-${settings.diameter}mm.stl`;
+  link.href=url;link.download=`clock-factory-${settings.design}-${settings.diameter}mm.${settings.exportFormat}`;
   document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
-  lastDownloadKey=key;$('downloadGuide').hidden=geometryKey()!==key;
-  toast(geometryKey()===key?'Your print file is ready. Next steps are below the download button.':`Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
+  lastDownloadKey=key;$('downloadGuide').hidden=fileKey()!==key;
+  toast(fileKey()===key?'Your print file is ready. Next steps are below the download button.':`Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
 }
 $('cancelExport').onclick=()=>exportController?.abort();
 $('export').onclick=async()=>{
   if(importPending||deletingArtwork||restorePending||exportController||!validateDimensions(true))return;
-  const settings={...state},key=geometryKey(settings),image=customImage,placement=[...artworkOrientation];
+  const settings={...state,faceColor:colors[state.color][1]},geometry=geometryKey(settings),key=fileKey(settings),image=customImage,placement=[...artworkOrientation];
   if(exportCache?.key===key){downloadClock(exportCache.blob,settings,key);return;}
   const controller=new AbortController();exportController=controller;
   const button=$('export');button.disabled=true;button.textContent='Preparing your clock…';
@@ -302,22 +323,27 @@ $('export').onclick=async()=>{
   await new Promise(r=>setTimeout(r,0));
   try{
     controller.signal.throwIfAborted();
-    const n=Math.ceil(settings.diameter/.15),canvas=document.createElement('canvas');canvas.width=canvas.height=n;const ctx=canvas.getContext('2d',{willReadFrequently:true});
+    const cachedSTL=meshCache?.key===geometry?meshCache.buffer:null;
+    let alpha=null,n=0;
+    if(!cachedSTL){
+    n=Math.ceil(settings.diameter/.15);const canvas=document.createElement('canvas');canvas.width=canvas.height=n;const ctx=canvas.getContext('2d',{willReadFrequently:true});
     ctx.scale(n/400,n/400);
     if(settings.design==='custom')drawPlacedArtwork(ctx,image,placement);else{ctx.fillStyle='#fff';ctx.fill(new Path2D(outlines.get(settings.design)));}
-    const pixels=ctx.getImageData(0,0,n,n).data,alpha=new Uint8Array(n*n);
+    const pixels=ctx.getImageData(0,0,n,n).data;alpha=new Uint8Array(n*n);
     for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
+    }
     controller.signal.throwIfAborted();
     $('exportStatus').textContent='Creating your print file… You can keep designing.';
-    const buffer=await meshAsync(alpha,n,settings,controller.signal);
+    const result=await meshAsync(alpha,n,settings,controller.signal,cachedSTL);
     controller.signal.throwIfAborted();
-    const blob=new Blob([buffer],{type:'model/stl'});exportCache={key,blob};
+    meshCache={key:geometry,buffer:result.stlBuffer};
+    const blob=new Blob([result.buffer],{type:settings.exportFormat==='3mf'?'model/3mf':'model/stl'});exportCache={key,blob};
     downloadClock(blob,settings,key);
   }catch(error){
     if(error.name==='AbortError')toast('Download cancelled. Your design is still here.');
     else toast('Could not export: '+error.message);
   }finally{
-    exportController=null;button.disabled=importPending||deletingArtwork||restorePending;button.innerHTML='Download STL <span>↓</span>';
+    exportController=null;button.disabled=importPending||deletingArtwork||restorePending;updateExportFormatUI();
     $('exportProgress').hidden=true;$('printSection').setAttribute('aria-busy','false');
   }
 };

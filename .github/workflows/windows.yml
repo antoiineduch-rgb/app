@@ -40,6 +40,9 @@ jobs:
       - name: Test saved SVG artwork and orientation
         run: npm run test:svg-library
 
+      - name: Test hour numerals and native 3MF downloads
+        run: npm run test:numerals-3mf
+
       - name: Build Windows installer
         run: npm run dist:win
 

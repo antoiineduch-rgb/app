@@ -11,7 +11,7 @@ await Promise.all(['studio.js','export-worker.js'].map(async name => {
   await writeFile(path,(await readFile(path,'utf8')).replace(/[\t ]+$/gm,''));
 }));
 const notices=[];
-for(const [name,file]of[['earcut','LICENSE'],['polygon-clipping','LICENSE.md'],['robust-predicates','LICENSE'],['splaytree','Readme.md']]){
+for(const [name,file]of[['earcut','LICENSE'],['polygon-clipping','LICENSE.md'],['robust-predicates','LICENSE'],['splaytree','Readme.md'],['fflate','LICENSE']]){
   const directory=join(import.meta.dirname,'node_modules',name);
   const metadata=JSON.parse(await readFile(join(directory,'package.json'),'utf8'));
   let license=await readFile(join(directory,file),'utf8');
