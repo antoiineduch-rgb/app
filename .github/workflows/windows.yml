@@ -43,6 +43,9 @@ jobs:
       - name: Test hour numerals and native 3MF downloads
         run: npm run test:numerals-3mf
 
+      - name: Test original SVG artwork, printable details, and 3MF textures
+        run: npm run test:svg-details
+
       - name: Build Windows installer
         run: npm run dist:win
 

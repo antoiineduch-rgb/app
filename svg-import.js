@@ -1,12 +1,12 @@
 // Import self-contained SVG artwork without inserting its markup into the editor.
-// Geometry is measured in an isolated shadow root, then rendered to an alpha
-// silhouette shared by the preview and STL export.
+// Geometry is measured in an isolated shadow root. Keep the original painted
+// artwork as well as a separate white alpha mask for the printable footprint.
 export const SVG_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 const SVG_RASTER_SIZE = 2048;
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const SVG_ELEMENTS = new Set(['svg','g','path','rect','circle','ellipse','polygon','polyline','line','defs','symbol','use','clipPath','mask','linearGradient','radialGradient','stop','pattern','text','tspan','textPath','image']);
-const SVG_ATTRIBUTES = new Set(['id','class','d','x','y','width','height','cx','cy','r','rx','ry','x1','x2','y1','y2','points','transform','viewBox','preserveAspectRatio','maskUnits','maskContentUnits','clipPathUnits','gradientUnits','gradientTransform','patternUnits','patternContentUnits','patternTransform','offset','spreadMethod','lengthAdjust','textLength','startOffset','dx','dy','rotate','pathLength']);
-const SVG_STYLES = new Set(['fill','fill-opacity','fill-rule','stroke','stroke-opacity','stroke-width','stroke-linecap','stroke-linejoin','stroke-miterlimit','stroke-dasharray','stroke-dashoffset','opacity','clip-path','clip-rule','mask','mask-type','display','visibility','color','font-family','font-size','font-style','font-weight','font-variant','letter-spacing','text-anchor','dominant-baseline','paint-order','vector-effect','transform','transform-origin','transform-box','stop-color','stop-opacity']);
+const SVG_ELEMENTS = new Set(['svg','g','path','rect','circle','ellipse','polygon','polyline','line','defs','symbol','use','clipPath','mask','linearGradient','radialGradient','stop','pattern','text','tspan','textPath','image','filter','feGaussianBlur','feOffset','feColorMatrix','feBlend','feComposite','feFlood','feMerge','feMergeNode','feComponentTransfer','feFuncR','feFuncG','feFuncB','feFuncA','feDropShadow']);
+const SVG_ATTRIBUTES = new Set(['id','class','d','x','y','width','height','cx','cy','r','rx','ry','fx','fy','fr','x1','x2','y1','y2','points','transform','viewBox','preserveAspectRatio','maskUnits','maskContentUnits','clipPathUnits','gradientUnits','gradientTransform','patternUnits','patternContentUnits','patternTransform','offset','spreadMethod','lengthAdjust','textLength','startOffset','dx','dy','rotate','pathLength','filterUnits','primitiveUnits','in','in2','result','stdDeviation','type','values','mode','operator','k1','k2','k3','k4','tableValues','slope','intercept','amplitude','exponent']);
+const SVG_STYLES = new Set(['fill','fill-opacity','fill-rule','stroke','stroke-opacity','stroke-width','stroke-linecap','stroke-linejoin','stroke-miterlimit','stroke-dasharray','stroke-dashoffset','opacity','clip-path','clip-rule','mask','mask-type','display','visibility','color','font-family','font-size','font-style','font-weight','font-variant','letter-spacing','word-spacing','text-anchor','dominant-baseline','paint-order','vector-effect','transform','transform-origin','transform-box','stop-color','stop-opacity','filter','flood-color','flood-opacity','color-interpolation-filters']);
 
 function safePaint(value) {
   if (/\\|(?:https?:|file:|data:|\/\/|@|expression\s*\(|var\s*\()/i.test(value)) return false;
@@ -103,8 +103,14 @@ export async function prepareSVG(source) {
     // Percentages must be resolved against the original viewport. Leaving them
     // relative would move artwork again when the fitted viewBox is assigned.
     for (const element of svg.querySelectorAll('*')) {
-      if (element.closest('symbol[viewBox]')) continue;
-      for (const name of ['x','y','width','height','cx','cy','r','rx','ry','x1','x2','y1','y2','dx','dy']) {
+      if (element.closest('symbol[viewBox]') || element.parentElement?.closest('pattern[viewBox],pattern[patternContentUnits="objectBoundingBox"],clipPath[clipPathUnits="objectBoundingBox"],mask[maskContentUnits="objectBoundingBox"],filter[primitiveUnits="objectBoundingBox"]')) continue;
+      // Resource percentages in objectBoundingBox units follow their painted
+      // shape, not the root viewport. Freezing them would flatten gradients or
+      // shift masks and filter regions when the imported drawing is fitted.
+      const units={linearGradient:'gradientUnits',radialGradient:'gradientUnits',pattern:'patternUnits',mask:'maskUnits',filter:'filterUnits'}[element.localName];
+      const objectBounds=units&&element.getAttribute(units)!=='userSpaceOnUse';
+      for (const name of ['x','y','width','height','cx','cy','r','rx','ry','fx','fy','fr','x1','x2','y1','y2','dx','dy']) {
+        if(objectBounds)continue;
         if (!element.getAttribute(name)?.includes('%')) continue;
         const value = element[name]?.baseVal;
         if (value && Number.isFinite(value.value)) element.setAttribute(name, String(value.value));
@@ -145,7 +151,7 @@ export async function prepareSVG(source) {
       padding = Math.max(padding, (parseFloat(style.strokeWidth) || 0) * scale * 2);
     }
     if (![box.x,box.y,box.width,box.height,padding].every(Number.isFinite) || (box.width <= 0 && box.height <= 0 && padding <= 0)) throw Error('This SVG has no visible shapes. Export your drawing as paths or filled shapes, then try again.');
-    padding += Math.max(box.width, box.height, 1) * .02;
+    padding += Math.max(box.width, box.height, 1) * (svg.querySelector('filter') ? .2 : .02);
     svg.setAttribute('viewBox', `${box.x-padding} ${box.y-padding} ${box.width+padding*2} ${box.height+padding*2}`);
   } finally { host.remove(); }
   const svgText = new XMLSerializer().serializeToString(svg);
@@ -163,8 +169,13 @@ export async function prepareSVG(source) {
   const fit = fitted.getContext('2d');
   const width=maxX-minX+1,height=maxY-minY+1,scale=(SVG_RASTER_SIZE*860/1024)/Math.max(width,height);
   fit.drawImage(canvas,minX,minY,width,height,(SVG_RASTER_SIZE-width*scale)/2,(SVG_RASTER_SIZE-height*scale)/2,width*scale,height*scale);
+  const artworkURL = fitted.toDataURL('image/png');
+  const image = new Image(); image.src = artworkURL; await image.decode();
   fit.globalCompositeOperation='source-in'; fit.fillStyle='#fff'; fit.fillRect(0,0,SVG_RASTER_SIZE,SVG_RASTER_SIZE);
-  const dataURL = fitted.toDataURL('image/png');
-  const image = new Image(); image.src = dataURL; await image.decode();
-  return { markup: `<image x="0" y="0" width="400" height="400" href="${dataURL}"/>`, image, svgText };
+  const maskURL = fitted.toDataURL('image/png');
+  return {
+    markup: `<image x="0" y="0" width="400" height="400" href="${maskURL}"/>`,
+    artworkMarkup: `<image x="0" y="0" width="400" height="400" href="${artworkURL}"/>`,
+    image, svgText,
+  };
 }

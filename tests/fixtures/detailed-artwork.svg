@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300">
+  <defs>
+    <style>.ink{fill:#24382d}.line{fill:none;stroke:#24382d;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}</style>
+    <linearGradient id="sky" x1="0%" y1="0%" x2="100%" y2="0%"><stop stop-color="#387cc1"/><stop offset="1" stop-color="#d35d51"/></linearGradient>
+    <pattern id="dots" width="10" height="10" patternUnits="userSpaceOnUse"><rect width="10" height="10" fill="#f4f0e3"/><circle cx="5" cy="5" r="1.8" fill="#24382d"/></pattern>
+    <clipPath id="round"><circle cx="220" cy="75" r="34"/></clipPath>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="2" dy="3" stdDeviation="2" flood-color="#24382d" flood-opacity=".4"/></filter>
+    <path id="leaf" d="M65 145Q65 105 105 108Q105 145 65 145Z"/>
+  </defs>
+  <rect x="10" y="10" width="280" height="280" rx="20" fill="#f4f0e3"/>
+  <rect x="35" y="35" width="105" height="55" rx="7" fill="url(#sky)"/>
+  <g clip-path="url(#round)"><rect x="180" y="35" width="80" height="80" fill="#6c9264"/><path d="M180 95L260 45" stroke="#f4f0e3" stroke-width="7"/></g>
+  <use href="#leaf" fill="#6c9264"/>
+  <path class="line" d="M63 148L95 117M74 137L73 124M84 127L95 128"/>
+  <text x="205" y="158" text-anchor="middle" font-family="sans-serif" font-size="35" font-weight="bold" class="ink">12</text>
+  <rect x="35" y="175" width="100" height="60" rx="5" class="ink"/>
+  <path d="M45 190H125M45 205H100M45 220H115" stroke="#f4f0e3" stroke-width="2.5"/>
+  <circle cx="218" cy="213" r="34" fill="url(#dots)"/>
+  <circle cx="218" cy="213" r="35" class="line"/>
+  <path class="line" stroke-dasharray="4 4" d="M40 260H260"/>
+  <circle cx="155" cy="114" r="9" fill="#d35d51" filter="url(#shadow)"/>
+</svg>

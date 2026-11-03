@@ -3109,6 +3109,70 @@
     return labels.length ? import_polygon_clipping2.default.union(...labels.map((label) => label.polygons)) : [];
   }
 
+  // svg-details.js
+  var luminance = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  function artworkRelief(rgba, alpha, n, mode = "contrast") {
+    if (!ArrayBuffer.isView(rgba) || rgba.length !== n * n * 4 || alpha?.length !== n * n) throw Error("The SVG detail image is incomplete.");
+    if (!["contrast", "dark", "light"].includes(mode)) throw Error("Choose a valid SVG relief style.");
+    const histogram = new Uint32Array(32768);
+    let dominant = 0, dominantCount = 0, minLight = 255, maxLight = 0, count = 0;
+    for (let i2 = 0; i2 < alpha.length; i2++) if (alpha[i2] >= 240) {
+      const p = i2 * 4, r = rgba[p], g = rgba[p + 1], b = rgba[p + 2], key = (r >> 3) * 1024 + (g >> 3) * 32 + (b >> 3);
+      if (++histogram[key] > dominantCount) {
+        dominant = key;
+        dominantCount = histogram[key];
+      }
+      const light = luminance(r, g, b);
+      minLight = Math.min(minLight, light);
+      maxLight = Math.max(maxLight, light);
+      count++;
+    }
+    const opaque = count > 0, cutoff = opaque ? 240 : 128;
+    if (!opaque) {
+      for (let i2 = 0; i2 < alpha.length; i2++) if (alpha[i2] >= cutoff) {
+        const p = i2 * 4, r = rgba[p], g = rgba[p + 1], b = rgba[p + 2], key = (r >> 3) * 1024 + (g >> 3) * 32 + (b >> 3);
+        if (++histogram[key] > dominantCount) {
+          dominant = key;
+          dominantCount = histogram[key];
+        }
+        const light = luminance(r, g, b);
+        minLight = Math.min(minLight, light);
+        maxLight = Math.max(maxLight, light);
+      }
+    }
+    let red = 0, green = 0, blue = 0, samples = 0;
+    for (let i2 = 0; i2 < alpha.length; i2++) if (alpha[i2] >= cutoff) {
+      const p = i2 * 4, r = rgba[p], g = rgba[p + 1], b = rgba[p + 2];
+      if ((r >> 3) * 1024 + (g >> 3) * 32 + (b >> 3) === dominant) {
+        red += r;
+        green += g;
+        blue += b;
+        samples++;
+      }
+    }
+    if (!samples) return null;
+    red /= samples;
+    green /= samples;
+    blue /= samples;
+    const distance = (r, g, b) => Math.sqrt(0.2126 * (r - red) ** 2 + 0.7152 * (g - green) ** 2 + 0.0722 * (b - blue) ** 2);
+    let maxDistance = 0;
+    if (mode === "contrast") {
+      for (let i2 = 0; i2 < alpha.length; i2++) if (alpha[i2] >= cutoff) {
+        const p = i2 * 4;
+        maxDistance = Math.max(maxDistance, distance(rgba[p], rgba[p + 1], rgba[p + 2]));
+      }
+    }
+    const range = maxLight - minLight;
+    if ((mode === "contrast" ? maxDistance : range) < 4) return null;
+    const relief = new Uint8Array(n * n);
+    for (let i2 = 0; i2 < alpha.length; i2++) if (alpha[i2] >= 128) {
+      const p = i2 * 4, r = rgba[p], g = rgba[p + 1], b = rgba[p + 2], light = luminance(r, g, b);
+      const value = mode === "contrast" ? distance(r, g, b) / maxDistance : mode === "dark" ? (maxLight - light) / range : (light - minLight) / range;
+      relief[i2] = Math.min(255, Math.max(0, Math.round(value * 255)), alpha[i2]);
+    }
+    return relief;
+  }
+
   // mesh.js
   var CURVE_ERROR = 0.02;
   var snap2 = (value) => Math.round(value * 1e6) / 1e6;
@@ -3130,8 +3194,8 @@
     const points = ring.map(([x2, y]) => [snap2(x2), snap2(y)]);
     return [...points, points[0]];
   }
-  function silhouette(alpha, n, diameter, frame = null) {
-    const source = traceContours(alpha, n);
+  function silhouette(alpha, n, diameter, frame = null, threshold = 127.5) {
+    const source = traceContours(alpha, n, threshold);
     if (!source.length) {
       if (frame) return { polygons: [], frame };
       throw Error("This shape has no printable filled area. Try another SVG.");
@@ -3223,7 +3287,7 @@
     return import_polygon_clipping3.default.union(...strips);
   }
   function buildClockLayers(alpha, n, settings, progress = () => {
-  }) {
+  }, artwork = null) {
     if (!Number.isInteger(n) || n < 2 || !alpha || alpha.length !== n * n) throw Error("The outline image must be a square pixel grid.");
     const { diameter, thickness, hole, texture, markers } = settings;
     if (![diameter, thickness, hole].every((value) => Number.isFinite(value) && value > 0) || !["smooth", "ripple", "grain"].includes(texture)) throw Error("The clock dimensions or texture are invalid.");
@@ -3233,7 +3297,8 @@
     if (!base.length) throw Error("The center opening covers the entire clock face.");
     const layers = [{ height: thickness, polygons: base }];
     progress("details");
-    if (texture === "smooth" && !markers) return layers;
+    const detailed = !!artwork?.rgba && settings.design === "custom" && settings.svgDetail !== "silhouette";
+    if (texture === "smooth" && !markers && !detailed) return layers;
     const rimPixels = Math.max(1, Math.ceil(0.3 / frame.scale));
     const detailOutline = silhouette(insetAlpha(alpha, n, rimPixels), n, diameter, frame).polygons;
     const detailRegion = detailOutline.length ? import_polygon_clipping3.default.difference(detailOutline, [[circle(hole / 2 + 0.3, 1e-3, 128)]]) : [];
@@ -3242,6 +3307,27 @@
     const markerOutline = markers ? silhouette(insetAlpha(alpha, n, rimPixels + 1), n, diameter, frame).polygons : [];
     const markerRegion = markerOutline.length ? import_polygon_clipping3.default.difference(markerOutline, [[circle(hole / 2 + 0.3 + frame.scale, 1e-3, 128)]]) : [];
     const ticks = markers && markerRegion.length ? import_polygon_clipping3.default.intersection(markerRegion, markerShapes) : [];
+    if (detailed) {
+      const height = settings.svgRelief ?? 0.8;
+      if (!Number.isFinite(height) || height < 0 || height > 2) throw Error("SVG relief must be between 0 and 2 mm.");
+      const relief = height > 0 ? artworkRelief(artwork.rgba, alpha, n, settings.svgTone || "contrast") : null;
+      let top = thickness, previous = detailRegion;
+      if (relief && detailRegion.length) {
+        const steps = Math.max(1, Math.min(8, Math.round(height / 0.2)));
+        for (let level = 1; level <= steps; level++) {
+          const region = silhouette(relief, n, diameter, frame, (level - 0.5) * 255 / steps).polygons;
+          const detail = region.length && previous.length ? import_polygon_clipping3.default.intersection(previous, region) : [];
+          previous = detail;
+          const raised = ticks.length ? detail.length ? import_polygon_clipping3.default.union(detail, ticks) : ticks : detail;
+          if (raised.length) {
+            top = thickness + height * level / steps;
+            layers.push({ height: top, polygons: raised });
+          }
+        }
+      }
+      if (ticks.length) layers.push({ height: top + 0.8, polygons: ticks });
+      return layers;
+    }
     if (texture !== "smooth") {
       let pattern = texture === "ripple" ? ripplePolygons(diameter) : hatchPolygons(diameter);
       let first = [];
@@ -3259,8 +3345,8 @@
     return layers;
   }
   function makeClockSTL(alpha, n, settings, progress = () => {
-  }) {
-    const layers = buildClockLayers(alpha, n, settings, progress);
+  }, artwork = null) {
+    const layers = buildClockLayers(alpha, n, settings, progress, artwork);
     progress("mesh");
     return extrudeLayers(layers);
   }
@@ -3974,6 +4060,7 @@
 
   // export-3mf.js
   var CORE_NAMESPACE = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02";
+  var MATERIAL_NAMESPACE = "http://schemas.microsoft.com/3dmanufacturing/material/2015/02";
   var MODEL_TYPE = "application/vnd.ms-package.3dmanufacturing-3dmodel+xml";
   var XML_HEADER = '<?xml version="1.0" encoding="UTF-8"?>';
   function escapeXML(value) {
@@ -3988,7 +4075,7 @@
     if (ArrayBuffer.isView(input)) return new DataView(input.buffer, input.byteOffset, input.byteLength);
     throw new TypeError("The printable mesh must be a binary STL buffer.");
   }
-  function stlTo3MF(buffer, { name = "Clock Factory", color = "#C47F62" } = {}) {
+  function stlTo3MF(buffer, { name = "Clock Factory", color = "#C47F62", artwork = null } = {}) {
     if (typeof name !== "string") throw new TypeError("The model name must be text.");
     if (typeof color !== "string" || !/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(color)) {
       throw new TypeError("The model color must be #RRGGBB or #RRGGBBAA.");
@@ -3998,7 +4085,12 @@
     if (view.byteLength < 84) throw new RangeError("The printable mesh is incomplete.");
     const count = view.getUint32(80, true);
     if (!count || 84 + count * 50 !== view.byteLength) throw new RangeError("The printable mesh has an invalid triangle count.");
-    const vertexIds = /* @__PURE__ */ new Map(), vertices = [], triangles = [];
+    if (artwork) {
+      const { png, frame, thickness } = artwork;
+      if (!(png instanceof Uint8Array) || png.length < 24 || ![137, 80, 78, 71, 13, 10, 26, 10].every((value, i2) => png[i2] === value)) throw new TypeError("The SVG color texture must be a PNG image.");
+      if (!frame || ![frame.scale, frame.cx, frame.cy, frame.n, thickness].every(Number.isFinite) || frame.scale <= 0 || frame.n < 2 || thickness <= 0) throw new RangeError("The SVG color texture has an invalid placement.");
+    }
+    const vertexIds = /* @__PURE__ */ new Map(), vertices = [], triangles = [], textureCoordinates = [];
     function vertex(point) {
       const key = point.join(",");
       let index = vertexIds.get(key);
@@ -4006,6 +4098,11 @@
         index = vertices.length;
         vertexIds.set(key, index);
         vertices.push(`<vertex x="${point[0]}" y="${point[1]}" z="${point[2]}"/>`);
+        if (artwork) {
+          const { scale, cx, cy, n } = artwork.frame;
+          const u = (point[0] / scale + cx) / n, v = 1 - (cy - point[1] / scale) / n;
+          textureCoordinates.push(`<m:tex2coord u="${u}" v="${v}"/>`);
+        }
       }
       return index;
     }
@@ -4019,16 +4116,21 @@
         throw new RangeError("The printable mesh contains an empty triangle.");
       }
       const indices = points.map(vertex);
-      triangles.push(`<triangle v1="${indices[0]}" v2="${indices[1]}" v3="${indices[2]}"/>`);
+      const painted = artwork && points.every((point) => point[2] >= artwork.thickness - 1e-5);
+      const properties = painted ? ` pid="4" p1="${indices[0]}" p2="${indices[1]}" p3="${indices[2]}"` : "";
+      triangles.push(`<triangle v1="${indices[0]}" v2="${indices[1]}" v3="${indices[2]}"${properties}/>`);
     }
     const title = escapeXML(name.trim() || "Clock Factory");
+    const textureResources = artwork ? `<m:texture2d id="3" path="/3D/Textures/artwork.png" contenttype="image/png" tilestyleu="clamp" tilestylev="clamp" filter="linear"/>
+<m:texture2dgroup id="4" texid="3">${textureCoordinates.join("")}</m:texture2dgroup>
+` : "";
     const model = `${XML_HEADER}
-<model unit="millimeter" xml:lang="en-US" xmlns="${CORE_NAMESPACE}">
+<model unit="millimeter" xml:lang="en-US" xmlns="${CORE_NAMESPACE}"${artwork ? ` xmlns:m="${MATERIAL_NAMESPACE}"` : ""}>
 <metadata name="Application">Clock Factory</metadata>
 <metadata name="Title">${title}</metadata>
 <resources>
 <basematerials id="1"><base name="Clock face" displaycolor="${materialColor}"/></basematerials>
-<object id="2" type="model" name="${title}" pid="1" pindex="0"><mesh>
+${textureResources}<object id="2" type="model" name="${title}" pid="1" pindex="0"><mesh>
 <vertices>${vertices.join("")}</vertices>
 <triangles>${triangles.join("")}</triangles>
 </mesh></object>
@@ -4039,28 +4141,34 @@
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="model" ContentType="${MODEL_TYPE}"/>
-<Override PartName="/3D/3dmodel.model" ContentType="${MODEL_TYPE}"/>
+${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Override PartName="/3D/3dmodel.model" ContentType="${MODEL_TYPE}"/>
 </Types>`;
     const relationships = `${XML_HEADER}
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" Target="/3D/3dmodel.model"/>
 </Relationships>`;
-    const zip = zipSync({
+    const files = {
       "[Content_Types].xml": strToU8(contentTypes),
       "_rels/.rels": strToU8(relationships),
       "3D/3dmodel.model": strToU8(model)
-    }, { level: 6, mtime: new Date(2e3, 0, 1) });
+    };
+    if (artwork) {
+      files["3D/Textures/artwork.png"] = artwork.png;
+      files["3D/_rels/3dmodel.model.rels"] = strToU8(`${XML_HEADER}
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="artwork" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dtexture" Target="/3D/Textures/artwork.png"/></Relationships>`);
+    }
+    const zip = zipSync(files, { level: 6, mtime: new Date(2e3, 0, 1) });
     return zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength);
   }
 
   // export-worker-source.js
   self.onmessage = ({ data }) => {
-    const { id, alpha, n, settings, stlBuffer } = data;
+    const { id, alpha, n, settings, stlBuffer, artwork } = data;
     try {
-      const mesh = stlBuffer || makeClockSTL(new Uint8Array(alpha), n, settings, (stage) => self.postMessage({ id, stage }));
+      const mesh = stlBuffer || makeClockSTL(new Uint8Array(alpha), n, settings, (stage) => self.postMessage({ id, stage }), artwork);
       if (settings.exportFormat === "3mf") {
         self.postMessage({ id, stage: "package" });
-        const buffer = stlTo3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor || "#C47F62" });
+        const buffer = stlTo3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor || "#C47F62", artwork: artwork?.texture });
         self.postMessage({ id, buffer, stlBuffer: mesh }, [buffer, mesh]);
       } else self.postMessage({ id, buffer: mesh }, [mesh]);
     } catch (error) {

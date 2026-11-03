@@ -2,6 +2,7 @@ import clipping from 'polygon-clipping';
 import { traceContours, simplifyRing } from './contours.js';
 import { extrudeLayers } from './mesh-extrusion.js';
 import { hourNumeralPolygons } from './hour-numerals.js';
+import { artworkRelief } from './svg-details.js';
 
 const CURVE_ERROR = .02;
 const snap = value => Math.round(value*1e6)/1e6;
@@ -25,8 +26,8 @@ function closed(ring,positive=true) {
   return [...points,points[0]];
 }
 
-function silhouette(alpha,n,diameter,frame=null) {
-  const source=traceContours(alpha,n);
+function silhouette(alpha,n,diameter,frame=null,threshold=127.5) {
+  const source=traceContours(alpha,n,threshold);
   if(!source.length){if(frame)return {polygons:[],frame};throw Error('This shape has no printable filled area. Try another SVG.');}
   if(source.length>4096)throw Error('This SVG has too many separate details. Simplify its smallest shapes before exporting.');
   let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
@@ -102,7 +103,7 @@ function hatchPolygons(diameter) {
   return clipping.union(...strips);
 }
 
-export function buildClockLayers(alpha,n,settings,progress=()=>{}) {
+export function buildClockLayers(alpha,n,settings,progress=()=>{},artwork=null) {
   if(!Number.isInteger(n)||n<2||!alpha||alpha.length!==n*n)throw Error('The outline image must be a square pixel grid.');
   const {diameter,thickness,hole,texture,markers}=settings;
   if(![diameter,thickness,hole].every(value=>Number.isFinite(value)&&value>0)||!['smooth','ripple','grain'].includes(texture))throw Error('The clock dimensions or texture are invalid.');
@@ -114,7 +115,8 @@ export function buildClockLayers(alpha,n,settings,progress=()=>{}) {
   if(!base.length)throw Error('The center opening covers the entire clock face.');
   const layers=[{height:thickness,polygons:base}];
   progress('details');
-  if(texture==='smooth'&&!markers)return layers;
+  const detailed=!!artwork?.rgba&&settings.design==='custom'&&settings.svgDetail!=='silhouette';
+  if(texture==='smooth'&&!markers&&!detailed)return layers;
   const rimPixels=Math.max(1,Math.ceil(.3/frame.scale));
   const detailOutline=silhouette(insetAlpha(alpha,n,rimPixels),n,diameter,frame).polygons;
   const detailRegion=detailOutline.length?clipping.difference(detailOutline,[[circle(hole/2+.3,.001,128)]]):[];
@@ -123,6 +125,26 @@ export function buildClockLayers(alpha,n,settings,progress=()=>{}) {
   const markerOutline=markers?silhouette(insetAlpha(alpha,n,rimPixels+1),n,diameter,frame).polygons:[];
   const markerRegion=markerOutline.length?clipping.difference(markerOutline,[[circle(hole/2+.3+frame.scale,.001,128)]]):[];
   const ticks=markers&&markerRegion.length?clipping.intersection(markerRegion,markerShapes):[];
+  if(detailed){
+    const height=settings.svgRelief??.8;
+    if(!Number.isFinite(height)||height<0||height>2)throw Error('SVG relief must be between 0 and 2 mm.');
+    const relief=height>0?artworkRelief(artwork.rgba,alpha,n,settings.svgTone||'contrast'):null;
+    let top=thickness,previous=detailRegion;
+    if(relief&&detailRegion.length){
+      const steps=Math.max(1,Math.min(8,Math.round(height/.2)));
+      for(let level=1;level<=steps;level++){
+        const region=silhouette(relief,n,diameter,frame,(level-.5)*255/steps).polygons;
+        // Keep all levels nested, including after contour simplification. Each
+        // step is part of the same solid, never a floating illustration layer.
+        const detail=region.length&&previous.length?clipping.intersection(previous,region):[];
+        previous=detail;
+        const raised=ticks.length?(detail.length?clipping.union(detail,ticks):ticks):detail;
+        if(raised.length){top=thickness+height*level/steps;layers.push({height:top,polygons:raised});}
+      }
+    }
+    if(ticks.length)layers.push({height:top+.8,polygons:ticks});
+    return layers;
+  }
   if(texture!=='smooth'){
     let pattern=texture==='ripple'?ripplePolygons(diameter):hatchPolygons(diameter);
     // Union the patterns before clipping them to the face. Unioning separately
@@ -144,8 +166,8 @@ export function buildClockLayers(alpha,n,settings,progress=()=>{}) {
   return layers;
 }
 
-export function makeClockSTL(alpha,n,settings,progress=()=>{}) {
-  const layers=buildClockLayers(alpha,n,settings,progress);
+export function makeClockSTL(alpha,n,settings,progress=()=>{},artwork=null) {
+  const layers=buildClockLayers(alpha,n,settings,progress,artwork);
   progress('mesh');
   return extrudeLayers(layers);
 }

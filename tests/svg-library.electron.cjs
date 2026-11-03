@@ -278,6 +278,10 @@ async function run(window) {
   await evaluate(() => document.querySelector('[data-design="round"]').click());
   assert.match((await snapshot()).title, /Essential/);
   await click('useArtwork'); assertPixels(await maskPixels(), mixedMask, 'reuse imported artwork after choosing a preset');
+  // Saving is debounced. An older custom-artwork record can already satisfy
+  // persisted(), so wait for this exact mixed transform before comparing it
+  // with the restored record after reload.
+  await waitFor(()=>JSON.stringify(JSON.parse(localStorage.getItem('clock-factory')||'{}').artworkOrientation)==='[0,-1,-1,0]','latest mixed artwork orientation to persist');
   const selected = await persisted();
   assert.equal(selected.artworkId, originalId);
   await reload();

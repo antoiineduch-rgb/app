@@ -11,7 +11,7 @@ function unpack(buffer) {
 }
 function modelGeometry(model) {
   const vertices = [...model.matchAll(/<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"\/>/g)].map(match => match.slice(1).map(Number));
-  const triangles = [...model.matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"\/>/g)].map(match => match.slice(1).map(Number));
+  const triangles = [...model.matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"[^>]*\/>/g)].map(match => match.slice(1).map(Number));
   return {vertices,triangles};
 }
 function signedVolume(triangles) {
@@ -81,4 +81,23 @@ test('invalid binary STL and nonprintable coordinates are rejected', () => {
   assert.throws(()=>stlTo3MF(degenerate),/empty triangle/);
   assert.throws(()=>stlTo3MF(stl,{color:'red'}),TypeError);
   assert.throws(()=>stlTo3MF(stl,{name:null}),TypeError);
+});
+
+test('SVG color textures are embedded, related, and mapped to the existing top surface',()=>{
+  const png=new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64'));
+  const stl=fixture(),artwork={png,frame:{scale:.2,cx:50,cy:50,n:100},thickness:3};
+  const zip=unzipSync(new Uint8Array(stlTo3MF(stl,{artwork}))),model=strFromU8(zip['3D/3dmodel.model']);
+  assert.deepEqual(zip['3D/Textures/artwork.png'],png,'the original painted pixels are preserved');
+  assert.match(strFromU8(zip['3D/_rels/3dmodel.model.rels']),/3dtexture" Target="\/3D\/Textures\/artwork.png"/);
+  assert.match(strFromU8(zip['[Content_Types].xml']),/Extension="png" ContentType="image\/png"/);
+  assert.match(model,/xmlns:m="http:\/\/schemas.microsoft.com\/3dmanufacturing\/material\/2015\/02"/);
+  assert.match(model,/<m:texture2d id="3" path="\/3D\/Textures\/artwork.png"/);
+  assert.match(model,/<m:texture2dgroup id="4" texid="3">/);
+  const {vertices,triangles}=modelGeometry(model),coordinates=[...model.matchAll(/<m:tex2coord u="([^"]+)" v="([^"]+)"\/>/g)].map(m=>m.slice(1).map(Number));
+  assert.deepEqual({vertices,triangles},modelGeometry(unpack(stlTo3MF(stl))['3D/3dmodel.model']),'adding color cannot change the printable mesh');
+  vertices.forEach((point,i)=>assert.deepEqual(coordinates[i],[(point[0]+10)/20,(point[1]+10)/20]));
+  const tags=[...model.matchAll(/<triangle\b[^>]*>/g)].map(m=>m[0]);
+  triangles.forEach((triangle,i)=>assert.equal(tags[i].includes('pid="4"'),triangle.every(v=>vertices[v][2]===3),'only the painted top uses the SVG texture'));
+  assert.throws(()=>stlTo3MF(stl,{artwork:{...artwork,png:new Uint8Array(30)}}),/PNG/);
+  assert.throws(()=>stlTo3MF(stl,{artwork:{...artwork,frame:{...artwork.frame,scale:0}}}),/placement/);
 });
