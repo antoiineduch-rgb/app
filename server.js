@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, basename } from 'node:path';
 const root = import.meta.dirname;
-const assets = { 'index.html':'text/html', 'style.css':'text/css', 'studio.js':'text/javascript', 'export-worker.js':'text/javascript', 'app.js':'text/javascript', 'geometry.js':'text/javascript', 'THIRD_PARTY_NOTICES.txt':'text/plain' };
+const assets = { 'index.html':'text/html', 'style.css':'text/css', 'studio.js':'text/javascript', 'export-worker.js':'text/javascript', 'mesh-view.js':'text/javascript', 'app.js':'text/javascript', 'geometry.js':'text/javascript', 'THIRD_PARTY_NOTICES.txt':'text/plain' };
 export function createServer() {
   return http.createServer(async (req, res) => {
     try {

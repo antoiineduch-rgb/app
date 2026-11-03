@@ -5,7 +5,7 @@ const { appResponse, isAppURL, CSP } = require('./assets.cjs');
 const root = join(__dirname, '..');
 
 test('desktop protocol serves only app assets with CSP, including the export worker', async () => {
-  for (const name of ['index.html', 'style.css', 'studio.js', 'export-worker.js']) {
+  for (const name of ['index.html', 'style.css', 'studio.js', 'export-worker.js', 'mesh-view.js']) {
     const response = await appResponse(new Request(`clock://studio/${name}`), root);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-security-policy'), CSP);

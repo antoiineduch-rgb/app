@@ -8,9 +8,23 @@ npm start
 
 Run `npm ci` once to install build tools. The browser development server listens on port 3000 (override with `PORT`). `npm start` and `npm run dev` rebuild the browser script and STL worker before starting. Run `npm ci` before developing the desktop app or running the complete test suite; `npm test` covers geometry, HTTP, and desktop assets.
 
-For static hosting, run `npm ci` followed by `npm run build` and serve `index.html`, `style.css`, `studio.js`, and `export-worker.js`, and `THIRD_PARTY_NOTICES.txt` together. Relative asset URLs support hosting under a subdirectory. After updating, reload the page to load the new browser script. The worker is bundled from `mesh.js`, `mesh-extrusion.js`, `contours.js`, and `export-worker-source.js`; edit those sources and rebuild rather than editing generated scripts.
+For static hosting, run `npm ci` followed by `npm run build` and serve `index.html`, `style.css`, `studio.js`, `export-worker.js`, `mesh-view.js`, and `THIRD_PARTY_NOTICES.txt` together. Relative asset URLs support hosting under a subdirectory. After updating, reload the page to load the new browser script. The worker is bundled from `mesh.js`, `mesh-extrusion.js`, `contours.js`, and `export-worker-source.js`; the lazy 3D viewer is bundled from `mesh-view-source.js`. Edit these sources and rebuild rather than editing generated scripts.
 
-STL generation runs in a background worker so the editor stays usable while exporting. You can cancel an in-progress export. The last print file is cached for immediate repeat downloads, including after color-only changes; shape, size, texture, marker, or mechanism changes produce a new file. Hosts that block workers use a local fallback.
+STL generation runs in a background worker so the editor stays usable while exporting. You can cancel an in-progress export. Preview, print checks, and download share in-progress builds; cancelling the preview cannot cancel a download using that model. The two most recent meshes and last print file are cached. Color, camera, and display changes reuse geometry. Hosts that block workers use a local fallback.
+
+## Projects and editing
+
+Name your project and use **Save project** to download a portable `.clock` file containing all settings, the original SVG, and its orientation. **Open project** restores it in the browser or Windows app, including on another device. This is an editable project backup, separate from STL/3MF print exports. Imported project files are limited to 12 MB, embedded SVGs to 5 MB. Invalid files leave the current design intact. Restored SVGs pass through the same sanitizer as direct imports, and local-save failures are shown honestly while the project remains usable for the session.
+
+Undo/redo stores up to 60 design states, including imported artwork and reset operations. Slider movements are grouped into a single undo step. Use the toolbar, Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, or Ctrl+Y; text fields keep their normal text-editing undo. Ctrl/Cmd+S saves a project and Ctrl/Cmd+O opens one. The Windows File and Edit menus offer the same project and history actions. History stays in the current session; the latest design is saved locally and project files provide portable backups. Reset keeps the saved SVG library.
+
+Set the diameter from 100 to 300 mm in 1 mm steps using the slider or exact-size field. **Show hands** controls the illustrative hands in Design view; they never appear in print files. The welcome card can be dismissed, tabs support arrow-key navigation, and the workspace adapts to mobile screens.
+
+## Real 3D preview and print checks
+
+**Design** shows the artwork with optional illustrative hands. **Print mesh** displays the actual validated STL geometry, including shaft opening, thickness, SVG relief, and hour details. Drag to orbit, scroll/pinch or use the buttons to zoom, and use Front/Angle to inspect the surface. The optional edges, build-plate, and SVG-color displays do not alter the exported model. SVG colors use the same embedded texture placement as 3MF. Three.js is bundled locally and loaded only when needed; rendering runs on changes rather than in a continuous animation loop. If 3D graphics are unavailable, design editing, model checks, and downloads remain usable.
+
+**Check model** reports the measured X × Y × Z bounds, solid volume in cm³, and number of connected parts. Solid volume describes the model geometry, not an infill-dependent material estimate or print-time estimate. The build-plate settings accept 80–500 mm per side and check both direct and quarter-turn fit. **Make it fit** reduces the diameter with a 2 mm margin per side when possible. The 100 mm minimum still applies. Multiple disconnected SVG pieces are reported so they can be assembled or given a backing; no connecting geometry is silently added. Print checks supplement inspection in the printer's slicer.
 
 Choose one of six designs or upload SVG artwork, adjust dimensions and finish, and download a binary STL or a standard 3MF model. SVG colors, strokes, gradients, patterns, lettering, local styles, symbols, clipping, masks, embedded images, and common filters are retained in the preview. Original artwork is the default; its color contrast becomes printable relief instead of disappearing into a flat silhouette. STL units are millimeters. Export traces antialiased contours at approximately 0.15 mm sampling, triangulates flat faces, and uses analytic circular geometry for the shaft opening and ripple rings. Curve simplification is limited to 0.02 mm. A narrow smooth rim keeps surface details clear of outer edges and cutouts; very thin artwork can remain smooth. Preset textures and hour markers add up to 0.8 mm; SVG relief is adjustable from 0 to 2 mm, with added hour details up to 0.8 mm above it. Slicer inspection is recommended, particularly for disconnected uploaded artwork. Hands and movements are not included. There is no rear movement recess; choose a shaft long enough for the face and relief. Preset settings are stored locally; up to eight recent SVG files are saved locally on the device. No account, API keys, or installation is needed.
 
@@ -18,10 +32,10 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.4.0-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.4.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.5.0-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.5.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
-End users do not need Node.js or a development server. SVG files are opened locally, and STL files are saved on the computer. Download names use the app version, so later versions will have a different version number.
+End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
 To develop the desktop app, install Node.js 22.12.0 or newer and run:
 
@@ -39,7 +53,7 @@ npm run dist:win:portable
 
 Both downloads are written to `dist/`. They are currently unsigned; signed distribution requires a code-signing certificate.
 
-The **Windows desktop app** GitHub Actions workflow can be run manually from the repository's Actions tab, or by pushing a version tag such as `v1.0.0`. It installs locked dependencies, builds the assets, runs the tests, and packages both downloads in the same Windows job. Download the **Clock-Factory-Windows-x64** artifact from the completed run; it contains the installer, portable app, and `SHA256SUMS.txt`. Creating the workflow does not start a remote build or publish a release.
+The **Windows desktop app** GitHub Actions workflow runs on pushes to `main`, version tags such as `v1.5.0`, or a manual run from the repository's Actions tab. It installs locked dependencies, builds the assets, runs the tests, and packages both downloads in the same Windows job. Download the **Clock-Factory-Windows-x64** artifact from the completed run; it contains the installer, portable app, and `SHA256SUMS.txt`. Creating the workflow alone does not start a remote build or publish a release.
 
 SVG imports are fitted to their visible artwork, including drawings with large viewBoxes and transformed groups. Preview and exported geometry share the same footprint and orientation. External resources and executable content are removed; embed linked images and convert text to paths when exact lettering across devices matters. Self-contained artwork is rasterized at 2048 pixels before fitting; printing details finer than the contour sampling or printer resolution is approximate. Imports up to 5 MB are saved locally in an eight-file recent library, and the selected artwork, detail settings, and quarter-turn/mirror orientation are restored on reopening. When local storage is unavailable, the current SVG remains usable for the session and is clearly marked as unsaved.
 
@@ -60,3 +74,5 @@ Choose STL or 3MF beside the download button. Both contain the same validated ge
 Run `npm run test:numerals-3mf` for desktop checks of number styles, size, position, saved settings, matching STL/3MF geometry, color, and a real native 3MF save. On display-free Linux pass the same Electron headless flags used for the SVG suites.
 
 Run `npm run test:svg-details` for original SVG color, gradient, pattern, fine-line, text, filter, and clipping checks, real detailed STL/3MF downloads, maximum relief with added numerals, texture orientation, worker fallback, and saved detail controls.
+
+Run `npm run test:studio` for project round-trips and native downloads, undo/redo and native menus, exact-size validation, genuine rendered 3D pixels, shared preview/export builds, build-plate fit, disconnected-part detection, cancellation during texture loading, mobile layout, and graphics fallback. The test uses software WebGL for deterministic graphics; the shipped application uses the device's normal graphics settings. On display-free Linux, run `npx electron --no-sandbox --ozone-platform=headless tests/studio.electron.cjs` after building, without `--disable-gpu`.

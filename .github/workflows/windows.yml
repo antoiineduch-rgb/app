@@ -46,6 +46,9 @@ jobs:
       - name: Test original SVG artwork, printable details, and 3MF textures
         run: npm run test:svg-details
 
+      - name: Test projects, undo, print checks, and real 3D inspection
+        run: npm run test:studio
+
       - name: Build Windows installer
         run: npm run dist:win
 

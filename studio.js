@@ -2389,27 +2389,27 @@
   function validThumbnail(value) {
     if (typeof value !== "string" || value.length > Math.ceil(MAX_THUMBNAIL_BYTES / 3) * 4 + 22 || !/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/.test(value)) return false;
     const base64 = value.slice("data:image/png;base64,".length);
-    const bytes = base64.length * 3 / 4 - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
-    return base64.length % 4 === 0 && bytes <= MAX_THUMBNAIL_BYTES;
+    const bytes2 = base64.length * 3 / 4 - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
+    return base64.length % 4 === 0 && bytes2 <= MAX_THUMBNAIL_BYTES;
   }
   function checkedInput(input) {
     if (!input || typeof input.source !== "string" || !input.source.trim()) throw new TypeError("Choose an SVG file before saving it.");
     if (input.source.length > MAX_SOURCE_BYTES) throw new RangeError("Please choose an SVG smaller than 5 MB.");
-    const bytes = new TextEncoder().encode(input.source).byteLength;
-    if (bytes > MAX_SOURCE_BYTES) throw new RangeError("Please choose an SVG smaller than 5 MB.");
-    const size = input.size == null ? bytes : input.size;
+    const bytes2 = new TextEncoder().encode(input.source).byteLength;
+    if (bytes2 > MAX_SOURCE_BYTES) throw new RangeError("Please choose an SVG smaller than 5 MB.");
+    const size = input.size == null ? bytes2 : input.size;
     if (!Number.isSafeInteger(size) || size < 1 || size > MAX_SOURCE_BYTES) throw new RangeError("The SVG file size must be between 1 byte and 5 MB.");
     if (!validThumbnail(input.thumbnail)) throw new TypeError("The SVG thumbnail must be a PNG image smaller than 512 KB.");
     return { name: cleanName(input.name), source: input.source, thumbnail: input.thumbnail, size };
   }
-  function validRecord(record) {
-    return record && typeof record.id === "string" && record.id.length > 0 && record.id.length <= 128 && typeof record.source === "string" && record.source.length <= MAX_SOURCE_BYTES && typeof record.name === "string" && validThumbnail(record.thumbnail) && Number.isSafeInteger(record.size) && record.size > 0 && record.size <= MAX_SOURCE_BYTES && Number.isSafeInteger(record.updatedAt) && record.updatedAt > 0;
+  function validRecord(record2) {
+    return record2 && typeof record2.id === "string" && record2.id.length > 0 && record2.id.length <= 128 && typeof record2.source === "string" && record2.source.length <= MAX_SOURCE_BYTES && typeof record2.name === "string" && validThumbnail(record2.thumbnail) && Number.isSafeInteger(record2.size) && record2.size > 0 && record2.size <= MAX_SOURCE_BYTES && Number.isSafeInteger(record2.updatedAt) && record2.updatedAt > 0;
   }
-  function metadata(record) {
-    return { id: record.id, name: cleanName(record.name), size: record.size, updatedAt: record.updatedAt, thumbnail: record.thumbnail };
+  function metadata(record2) {
+    return { id: record2.id, name: cleanName(record2.name), size: record2.size, updatedAt: record2.updatedAt, thumbnail: record2.thumbnail };
   }
-  function fullRecord(record) {
-    return { ...metadata(record), source: record.source };
+  function fullRecord(record2) {
+    return { ...metadata(record2), source: record2.source };
   }
   async function transaction(mode, action, run) {
     const database = await openDatabase();
@@ -2475,17 +2475,17 @@
       request.onsuccess = () => {
         try {
           const records = request.result.filter(validRecord);
-          const matching = records.find((record) => record.source === entry.source);
-          const ids = new Set(request.result.map((record) => record.id));
+          const matching = records.find((record2) => record2.source === entry.source);
+          const ids = new Set(request.result.map((record2) => record2.id));
           let id = matching?.id;
           while (!id || !matching && ids.has(id)) id = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${fallbackId++}`;
-          const lastTime = Math.max(0, ...records.map((record) => record.updatedAt));
+          const lastTime = Math.max(0, ...records.map((record2) => record2.updatedAt));
           const updatedAt = Math.max(Date.now(), lastTime < Number.MAX_SAFE_INTEGER ? lastTime + 1 : 0);
           const saved = { id, ...entry, updatedAt };
           store.put(saved);
-          const retained = [saved, ...records.filter((record) => record.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt);
-          const keep = new Set(retained.slice(0, MAX_SAVED_SVGS).map((record) => record.id));
-          for (const record of request.result) if (!keep.has(record.id)) store.delete(record.id);
+          const retained = [saved, ...records.filter((record2) => record2.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt);
+          const keep = new Set(retained.slice(0, MAX_SAVED_SVGS).map((record2) => record2.id));
+          for (const record2 of request.result) if (!keep.has(record2.id)) store.delete(record2.id);
           result(fullRecord(saved));
         } catch (error) {
           abort(error);
@@ -4632,10 +4632,242 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength);
   }
 
+  // project.js
+  var MAX_PROJECT_BYTES = 12 * 1024 * 1024;
+  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true });
+  var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"] };
+  var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.5], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2] };
+  var bytes = (value) => new TextEncoder().encode(value).byteLength;
+  var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  function projectName(value) {
+    return typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f<>]/g, "").trim().slice(0, 80) || "My Clock" : "My Clock";
+  }
+  function normalizeSettings(input = {}) {
+    if (!record(input)) input = {};
+    const settings = { ...DEFAULT_SETTINGS, projectName: projectName(input.projectName) };
+    for (const [key, values] of Object.entries(choices)) if (values.includes(input[key])) settings[key] = input[key];
+    for (const [key, [min, max, step]] of Object.entries(ranges)) {
+      const value = Number(input[key]);
+      if (input[key] != null && Number.isFinite(value)) settings[key] = Number(Math.min(max, Math.max(min, Math.round(value / step) * step)).toFixed(5));
+    }
+    for (const key of ["markers", "showHands"]) if (typeof input[key] === "boolean") settings[key] = input[key];
+    return settings;
+  }
+  function checkedArtwork(value) {
+    if (value == null) return null;
+    if (!record(value) || typeof value.source !== "string" || !value.source.trim()) throw Error("This project is missing its SVG artwork.");
+    if (value.source.length > 5 * 1024 * 1024 || bytes(value.source) > 5 * 1024 * 1024) throw Error("The project SVG must be smaller than 5 MB.");
+    const name = typeof value.name === "string" ? value.name.split(/[\\/]/).at(-1).replace(/[\u0000-\u001f\u007f<>]/g, "").slice(0, 255) : "Imported SVG.svg";
+    return { name: name || "Imported SVG.svg", source: value.source };
+  }
+  function parseProject(text) {
+    if (typeof text !== "string" || text.length > MAX_PROJECT_BYTES || bytes(text) > MAX_PROJECT_BYTES) throw Error("Choose a Clock Factory project smaller than 12 MB.");
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw Error("This file is not a valid Clock Factory project.");
+    }
+    if (!record(data) || data.format !== "clock-factory-project" || data.version !== 1 || !record(data.settings)) throw Error("This project format is not supported. Open a .clock file saved by Clock Factory.");
+    for (const [key, values] of Object.entries(choices)) if (data.settings[key] !== void 0 && !values.includes(data.settings[key])) throw Error(`The project has an invalid ${key} setting.`);
+    for (const [key, [min, max, step]] of Object.entries(ranges)) {
+      const value = data.settings[key];
+      if (value !== void 0 && (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max || Math.abs(value / step - Math.round(value / step)) > 1e-6)) throw Error(`The project has an invalid ${key} setting.`);
+    }
+    for (const key of ["markers", "showHands"]) if (data.settings[key] !== void 0 && typeof data.settings[key] !== "boolean") throw Error(`The project has an invalid ${key} setting.`);
+    const settings = normalizeSettings(data.settings), artwork = checkedArtwork(data.artwork), orientation = normalizeOrientation(data.orientation);
+    if (settings.design === "custom" && !artwork) throw Error("The project is missing its imported SVG.");
+    if (data.orientation !== void 0 && (!Array.isArray(data.orientation) || data.orientation.length !== 4 || !data.orientation.every((v, i2) => v === orientation[i2]))) throw Error("The project SVG orientation is invalid.");
+    return { settings, artwork, orientation };
+  }
+  function serializeProject(settings, artwork = null, orientation = null) {
+    const text = JSON.stringify({ format: "clock-factory-project", version: 1, settings: normalizeSettings(settings), artwork: checkedArtwork(artwork), orientation: normalizeOrientation(orientation) }, null, 2);
+    parseProject(text);
+    return text;
+  }
+  function projectFilename(name) {
+    let filename = projectName(name).replace(/[\\/:*?"|]/g, "-").replace(/[. ]+$/g, "").slice(0, 80) || "My Clock";
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(filename)) filename = "Clock-" + filename;
+    return `${filename}.clock`;
+  }
+
+  // history.js
+  var DesignHistory = class {
+    constructor(limit = 60) {
+      this.limit = Math.max(2, limit);
+      this.entries = [];
+      this.index = -1;
+      this.endGroup();
+    }
+    get canUndo() {
+      return this.index > 0;
+    }
+    get canRedo() {
+      return this.index < this.entries.length - 1;
+    }
+    reset(value, key) {
+      this.entries = [{ value, key }];
+      this.index = 0;
+      this.endGroup();
+    }
+    endGroup() {
+      this.group = null;
+      this.time = -Infinity;
+    }
+    commit(value, key, { group = null, time = Date.now() } = {}) {
+      if (this.entries[this.index]?.key === key) return false;
+      const replace = group && group === this.group && time - this.time < 700 && this.index > 0 && !this.canRedo;
+      this.entries.length = this.index + 1;
+      if (replace) this.entries[this.index] = { value, key };
+      else {
+        this.entries.push({ value, key });
+        this.index++;
+      }
+      if (this.entries.length > this.limit) {
+        this.entries.shift();
+        this.index--;
+      }
+      this.group = group;
+      this.time = time;
+      return true;
+    }
+    undo() {
+      if (!this.canUndo) return null;
+      this.endGroup();
+      return this.entries[--this.index].value;
+    }
+    redo() {
+      if (!this.canRedo) return null;
+      this.endGroup();
+      return this.entries[++this.index].value;
+    }
+  };
+
+  // mesh-store.js
+  var MeshStore = class {
+    constructor(limit = 2) {
+      this.limit = limit;
+      this.cache = /* @__PURE__ */ new Map();
+      this.pending = /* @__PURE__ */ new Map();
+    }
+    peek(key) {
+      return this.cache.get(key) || null;
+    }
+    get(key, build, { signal, onStage = () => {
+    } } = {}) {
+      if (signal?.aborted) return Promise.reject(signal.reason || new DOMException("Cancelled", "AbortError"));
+      if (this.cache.has(key)) {
+        const value = this.cache.get(key);
+        this.cache.delete(key);
+        this.cache.set(key, value);
+        return Promise.resolve(value);
+      }
+      let job = this.pending.get(key);
+      if (!job) {
+        job = { controller: new AbortController(), listeners: /* @__PURE__ */ new Set() };
+        this.pending.set(key, job);
+        job.promise = Promise.resolve().then(() => build(job.controller.signal, (stage) => {
+          for (const listener of job.listeners) listener.onStage(stage);
+        })).then((value) => {
+          job.controller.signal.throwIfAborted();
+          this.cache.set(key, value);
+          while (this.cache.size > this.limit) this.cache.delete(this.cache.keys().next().value);
+          return value;
+        }).finally(() => {
+          if (this.pending.get(key) === job) this.pending.delete(key);
+        });
+        job.promise.catch(() => {
+        });
+      }
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const listener = { onStage };
+        const clean = () => {
+          job.listeners.delete(listener);
+          signal?.removeEventListener("abort", abort);
+        };
+        const finish = (error, value) => {
+          if (settled) return;
+          settled = true;
+          clean();
+          error ? reject(error) : resolve(value);
+        };
+        const abort = () => {
+          finish(signal.reason || new DOMException("Cancelled", "AbortError"));
+          if (!job.listeners.size) {
+            job.controller.abort();
+            if (this.pending.get(key) === job) this.pending.delete(key);
+          }
+        };
+        job.listeners.add(listener);
+        signal?.addEventListener("abort", abort, { once: true });
+        job.promise.then((value) => finish(null, value), (error) => finish(error));
+      });
+    }
+  };
+
+  // mesh-analysis.js
+  function analyzeSTL(buffer) {
+    const view2 = buffer instanceof ArrayBuffer ? new DataView(buffer) : ArrayBuffer.isView(buffer) ? new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength) : null;
+    if (!view2 || view2.byteLength < 84) throw Error("The print model is incomplete.");
+    const count = view2.getUint32(80, true);
+    if (!count || view2.byteLength !== 84 + count * 50) throw Error("The print model has an invalid triangle count.");
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity], ids = /* @__PURE__ */ new Map(), parents = [], ranks = [];
+    let volume = 0, surfaceArea = 0;
+    const root = (id) => {
+      while (parents[id] !== id) {
+        parents[id] = parents[parents[id]];
+        id = parents[id];
+      }
+      return id;
+    };
+    const connect = (a, b) => {
+      a = root(a);
+      b = root(b);
+      if (a === b) return;
+      if (ranks[a] < ranks[b]) [a, b] = [b, a];
+      parents[b] = a;
+      if (ranks[a] === ranks[b]) ranks[a]++;
+    };
+    function vertex(point) {
+      const key = point.join(",");
+      let id = ids.get(key);
+      if (id === void 0) {
+        id = parents.length;
+        ids.set(key, id);
+        parents.push(id);
+        ranks.push(0);
+      }
+      return id;
+    }
+    for (let i2 = 0; i2 < count; i2++) {
+      const points = [0, 1, 2].map((j) => [0, 1, 2].map((k) => view2.getFloat32(96 + i2 * 50 + j * 12 + k * 4, true)));
+      for (const p of points) for (let k = 0; k < 3; k++) {
+        if (!Number.isFinite(p[k])) throw Error("The print model contains invalid coordinates.");
+        min[k] = Math.min(min[k], p[k]);
+        max[k] = Math.max(max[k], p[k]);
+      }
+      const [a, b, c] = points, u = b.map((v2, k) => v2 - a[k]), v = c.map((v2, k) => v2 - a[k]);
+      surfaceArea += Math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]) / 2;
+      volume += (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+      const [ia, ib, ic] = points.map(vertex);
+      connect(ia, ib);
+      connect(ia, ic);
+    }
+    let components = 0;
+    for (let i2 = 0; i2 < parents.length; i2++) if (root(i2) === i2) components++;
+    return { triangles: count, vertices: parents.length, components, min, max, dimensions: max.map((value, i2) => value - min[i2]), volume: Math.abs(volume), surfaceArea, bytes: view2.byteLength };
+  }
+  function bedFit(dimensions, width, depth, clearance = 0) {
+    if (!Array.isArray(dimensions) || dimensions.length < 2 || ![...dimensions.slice(0, 2), width, depth, clearance].every(Number.isFinite) || width <= 0 || depth <= 0 || clearance < 0) throw Error("Enter valid build plate dimensions.");
+    const [x2, y] = dimensions, fit = (a, b) => a + clearance * 2 <= width + 0.05 && b + clearance * 2 <= depth + 0.05;
+    return { fits: fit(x2, y) || fit(y, x2), rotated: !fit(x2, y) && fit(y, x2) };
+  }
+
   // app.js
   var $ = (id) => document.getElementById(id);
   var colors = [["Terracotta", "#c47f62"], ["Oat milk", "#dfd5bd"], ["Sage", "#94a18a"], ["Forest", "#485c48"], ["Ink", "#434643"], ["Lavender", "#aaa0b5"], ["Dusty rose", "#c99d99"]];
-  var initial = { design: "petal", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast" };
+  var initial = DEFAULT_SETTINGS;
   var state = { ...initial };
   var artworkOrientation = normalizeOrientation(null);
   var restoreReference = null;
@@ -4645,11 +4877,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const artworkId = typeof saved?.artworkId === "string" && saved.artworkId.length <= 128 ? saved.artworkId : null;
     const validDesign = saved && (designs.some((d) => d.id === saved.design) || saved.design === "custom" && artworkId);
     if (validDesign && Number.isInteger(saved.color) && colors[saved.color] && ["smooth", "ripple", "grain"].includes(saved.texture)) {
-      state = { ...initial, design: saved.design === "custom" ? "petal" : saved.design, color: saved.color, texture: saved.texture, markers: typeof saved.markers === "boolean" ? saved.markers : true, hourStyle: ["ticks", "arabic", "roman"].includes(saved.hourStyle) ? saved.hourStyle : "ticks", exportFormat: saved.exportFormat === "3mf" ? "3mf" : "stl", svgDetail: saved.svgDetail === "silhouette" ? "silhouette" : "artwork", svgTone: ["contrast", "dark", "light"].includes(saved.svgTone) ? saved.svgTone : "contrast" };
-      for (const [key, min, max, step] of [["diameter", 100, 300, 10], ["thickness", 2, 10, 0.5], ["hole", 5, 15, 0.5], ["numberSize", 70, 130, 5], ["numberPosition", 80, 120, 5], ["svgRelief", 0, 2, 0.2]]) {
-        const value = Number(saved[key]);
-        state[key] = Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value / step) * step)) : initial[key];
-      }
+      state = normalizeSettings(saved);
+      if (state.design === "custom") state.design = "petal";
       artworkOrientation = normalizeOrientation(saved.artworkOrientation);
       if (artworkId) {
         restoreReference = { id: artworkId, useCustom: saved.design === "custom", orientation: [...artworkOrientation] };
@@ -4666,6 +4895,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   var customArtwork = null;
   var customImage = null;
   var customRevision = 0;
+  var revisionCounter = 0;
   var importSequence = 0;
   var importPending = false;
   var zoom = 1;
@@ -4674,13 +4904,30 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   var rz = -7;
   var outlines = new Map(designs.map((d) => [d.id, shapePath(d.id)]));
   var workerURL = new URL("./export-worker.js", document.currentScript?.src || location.href);
+  var meshViewURL = new URL("./mesh-view.js", document.currentScript?.src || location.href);
+  var history = new DesignHistory();
+  var meshStore = new MeshStore(2);
   var toastTimer;
   var saveTimer;
   var previewKey = "";
   var exportCache = null;
-  var meshCache = null;
   var lastDownloadKey = null;
   var exportController = null;
+  var applyingHistory = false;
+  var previewMode = "design";
+  var meshView = null;
+  var loadedMeshKey = null;
+  var meshPreviewKey = null;
+  var meshPreviewController = null;
+  var meshPreviewTimer = null;
+  var checkController = null;
+  var checkKey = null;
+  var bed = { width: 220, depth: 220 };
+  try {
+    const saved = JSON.parse(localStorage.getItem("clock-factory-bed") || "null");
+    if (saved && [saved.width, saved.depth].every((v) => Number.isInteger(v) && v >= 80 && v <= 500)) bed = saved;
+  } catch {
+  }
   function originalArtwork(settings = state) {
     return settings.design === "custom" && settings.svgDetail === "artwork";
   }
@@ -4725,7 +4972,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   function faceMarkup() {
     return customSVG && state.design === "custom" ? `<g transform="${placementTransform(artworkOrientation)}">${customSVG}</g>` : `<path d="${outlines.get(state.design) || outlines.get("petal")}"/>`;
   }
-  function render({ forceInputs = false } = {}) {
+  function render({ forceInputs = false, historyGroup = null, recordHistory = true } = {}) {
     const color = colors[state.color][1], detailed = originalArtwork();
     const nextPreviewKey = JSON.stringify([state.design, state.color, state.texture, state.markers, state.hourStyle, state.numberSize, state.numberPosition, state.diameter, state.svgDetail, customRevision, artworkOrientation]);
     if (nextPreviewKey !== previewKey) {
@@ -4735,7 +4982,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         numberClearance = `<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2 * 400 / state.diameter}" stroke-linejoin="round">${hourNumeralMarkup(state)}</g></mask>`;
       }
       if (state.markers && state.hourStyle === "ticks") for (let i2 = 0; i2 < 12; i2++) ticks += `<rect x="197.5" y="76" width="5" height="${i2 % 3 === 0 ? 17 : 10}" rx="2" transform="rotate(${i2 * 30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
-      $("clockSvg").innerHTML = `<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance ? ' mask="url(#numberClearanceMask)"' : ""}>${state.texture === "ripple" ? Array.from({ length: 44 }, (_, i2) => `<circle cx="200" cy="200" r="${12 + i2 * 4}" fill="none" stroke="${i2 % 2 ? "#fff0da" : "#774832"}" stroke-opacity="${i2 % 2 ? ".18" : ".23"}" stroke-width=".8"/>`).join("") : state.texture === "grain" ? '<rect width="400" height="400" fill="url(#ridges)"/>' : ""}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
+      $("clockSvg").innerHTML = `<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance ? ' mask="url(#numberClearanceMask)"' : ""}>${state.texture === "ripple" ? Array.from({ length: 44 }, (_, i2) => `<circle cx="200" cy="200" r="${12 + i2 * 4}" fill="none" stroke="${i2 % 2 ? "#fff0da" : "#774832"}" stroke-opacity="${i2 % 2 ? ".18" : ".23"}" stroke-width=".8"/>`).join("") : state.texture === "grain" ? '<rect width="400" height="400" fill="url(#ridges)"/>' : ""}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g id="previewHands" style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
       if (detailed) {
         const painted = document.createElementNS("http://www.w3.org/2000/svg", "g");
         painted.id = "originalArtwork";
@@ -4768,7 +5015,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("diameter").setAttribute("aria-valuetext", `${state.diameter / 10} centimeters across`);
     $("colorName").textContent = colors[state.color][0];
     $("measure").textContent = state.diameter + " mm";
-    $("exportSize").textContent = `${state.diameter} mm across · ${state.thickness} mm thick`;
+    $("exportSize").textContent = `${state.diameter} mm across · ${state.thickness} mm base`;
     $("sizeHint").textContent = `${state.diameter / 10} cm across — ${state.diameter <= 160 ? "a compact clock for a shelf or desk." : state.diameter <= 220 ? "a lovely size for a desk or small wall." : "a statement piece for your wall. Check your printer’s bed size."}`;
     document.querySelectorAll("[data-size]").forEach((b) => {
       const active = Number(b.dataset.size) === state.diameter;
@@ -4796,9 +5043,123 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("designTitle").innerHTML = d ? `The ${d.name} Clock <span>↗</span>` : "Your Custom Clock <span>↗</span>";
     $("designDescription").textContent = d?.description || "Your own shape. Your own sense of time.";
     $("clockObject").style.filter = `drop-shadow(3px ${Math.round(state.thickness * 1.5)}px 0 ${color} ) drop-shadow(9px 19px 12px #726b4f30)`;
+    if (forceInputs || document.activeElement !== $("diameterNumber") && !$("diameterNumber").dataset.editing) $("diameterNumber").value = state.diameter;
+    if (forceInputs || document.activeElement !== $("projectName")) $("projectName").value = state.projectName;
+    $("showHands").checked = state.showHands;
+    const hands = $("clockSvg").querySelector("#previewHands");
+    if (hands) hands.toggleAttribute("hidden", !state.showHands);
     updateArtworkUI();
+    validateDimensions();
     persist();
+    if (recordHistory) checkpointHistory(historyGroup);
+    updateHistoryUI();
+    updatePrintSummary();
+    scheduleMeshPreview();
   }
+  function captureSnapshot() {
+    return { settings: { ...state }, orientation: [...artworkOrientation], artwork: activeArtwork ? { ...activeArtwork } : null, mask: customSVG, paint: customArtwork, image: customImage, revision: customRevision };
+  }
+  function snapshotKey() {
+    return JSON.stringify([state, artworkOrientation, activeArtwork ? customRevision : null]);
+  }
+  function checkpointHistory(group = null) {
+    if (!importPending && !restorePending && !applyingHistory) history.commit(captureSnapshot(), snapshotKey(), { group });
+  }
+  function updateHistoryUI() {
+    const busy = importPending || restorePending || deletingArtwork || applyingHistory;
+    $("undo").disabled = busy || !history.canUndo;
+    $("redo").disabled = busy || !history.canRedo;
+    $("openProject").disabled = $("saveProject").disabled = busy;
+    $("projectUpload").disabled = busy;
+  }
+  async function restoreHistory(action) {
+    if (importPending || restorePending || deletingArtwork || applyingHistory) return;
+    const snapshot = history[action]();
+    if (!snapshot) return;
+    const sequence = ++importSequence;
+    applyingHistory = true;
+    importPending = !!snapshot.artwork;
+    restoreReference = null;
+    restorePending = false;
+    state = { ...snapshot.settings };
+    artworkOrientation = [...snapshot.orientation];
+    customSVG = snapshot.mask;
+    customArtwork = snapshot.paint;
+    customImage = snapshot.image;
+    customRevision = snapshot.revision;
+    activeArtwork = snapshot.artwork ? { ...snapshot.artwork, id: null } : null;
+    for (const id of ["thickness", "hole", "diameterNumber"]) delete $(id).dataset.editing;
+    tab(state.design === "custom");
+    render({ forceInputs: true, recordHistory: false });
+    try {
+      if (activeArtwork) {
+        const saved = await saveSVG(activeArtwork);
+        if (sequence === importSequence) activeArtwork = saved;
+      }
+    } catch (error) {
+      if (sequence === importSequence) $("uploadStatus").textContent = error.message;
+    } finally {
+      if (sequence === importSequence) {
+        applyingHistory = false;
+        importPending = false;
+        render({ forceInputs: true, recordHistory: false });
+        refreshGallery();
+        toast(action === "undo" ? "Previous design restored." : "Design change restored.");
+      }
+    }
+  }
+  $("undo").onclick = () => restoreHistory("undo");
+  $("redo").onclick = () => restoreHistory("redo");
+  $("projectName").addEventListener("input", () => {
+    state.projectName = $("projectName").value;
+    render({ historyGroup: "projectName" });
+  });
+  $("projectName").addEventListener("blur", () => {
+    state.projectName = projectName(state.projectName);
+    render();
+    history.endGroup();
+  });
+  document.addEventListener("change", (event) => {
+    if (event.target.matches('input[type="range"]')) history.endGroup();
+  });
+  $("showHands").onchange = () => {
+    state.showHands = $("showHands").checked;
+    render();
+  };
+  try {
+    $("welcome").hidden = localStorage.getItem("clock-factory-welcome-hidden") === "true";
+  } catch {
+  }
+  $("dismissWelcome").onclick = () => {
+    $("welcome").hidden = true;
+    try {
+      localStorage.setItem("clock-factory-welcome-hidden", "true");
+    } catch {
+    }
+  };
+  for (const list of document.querySelectorAll('[role="tablist"]')) list.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const tabs = [...list.querySelectorAll('[role="tab"]')], index = tabs.indexOf(document.activeElement);
+    if (index < 0) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowLeft" ? -1 : 1) + tabs.length) % tabs.length;
+    tabs[next].focus();
+    tabs[next].click();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const key = event.key.toLowerCase(), editing = event.target instanceof Element && event.target.closest('textarea,[contenteditable="true"],input:not([type="range"]):not([type="checkbox"])');
+    if (key === "s") {
+      event.preventDefault();
+      $("saveProject").click();
+    } else if (key === "o") {
+      event.preventDefault();
+      $("openProject").click();
+    } else if (!editing && (key === "z" || key === "y")) {
+      event.preventDefault();
+      restoreHistory(key === "y" || event.shiftKey ? "redo" : "undo");
+    }
+  });
   designs.forEach((d) => {
     const b = document.createElement("button");
     b.className = "design-card";
@@ -4828,18 +5189,30 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     render();
   });
   function validateDimensions(focus = false) {
-    const invalid = ["thickness", "hole"].map($).find((input) => input.value === "" || !input.validity.valid);
-    for (const id of ["thickness", "hole"]) $(id).setAttribute("aria-invalid", String($(id).value === "" || !$(id).validity.valid));
-    $("dimensionError").hidden = !invalid;
+    const ids = ["diameterNumber", "thickness", "hole"], invalid = ids.map($).find((input) => input.value === "" || !input.validity.valid);
+    for (const id of ids) $(id).setAttribute("aria-invalid", String($(id).value === "" || !$(id).validity.valid));
+    $("dimensionError").hidden = !invalid || invalid.id === "diameterNumber";
+    $("sizeError").hidden = !invalid || invalid.id !== "diameterNumber";
     if (invalid) {
-      $("dimensionError").textContent = `Enter ${invalid.id === "hole" ? "a center hole from 5 to 15" : "a face thickness from 2 to 10"} mm, in steps of 0.5 mm.`;
+      const size = invalid.id === "diameterNumber";
+      $(size ? "sizeError" : "dimensionError").textContent = size ? "Enter a diameter from 100 to 300 mm, in steps of 1 mm." : `Enter ${invalid.id === "hole" ? "a center hole from 5 to 15" : "a face thickness from 2 to 10"} mm, in steps of 0.5 mm.`;
       if (focus) {
-        document.querySelector(".advanced-settings").open = true;
+        if (!size) document.querySelector(".advanced-settings").open = true;
         invalid.focus();
       }
     }
+    $("export").disabled = !!invalid || importPending || deletingArtwork || restorePending || !!exportController;
     return !invalid;
   }
+  $("diameterNumber").addEventListener("input", () => {
+    $("diameterNumber").dataset.editing = "true";
+    if (!validateDimensions()) return;
+    state.diameter = Number($("diameterNumber").value);
+    render({ historyGroup: "diameter" });
+  });
+  $("diameterNumber").addEventListener("blur", () => {
+    if (validateDimensions()) delete $("diameterNumber").dataset.editing;
+  });
   ["diameter", "thickness", "hole", "markers"].forEach((id) => $(id).addEventListener("input", () => {
     const input = $(id);
     if (id === "markers") state[id] = input.checked;
@@ -4852,7 +5225,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       state[id] = Number(input.value);
     }
     validateDimensions();
-    render();
+    render({ historyGroup: id === "markers" ? null : id });
   }));
   for (const id of ["hourStyle", "exportFormat", "svgDetail", "svgTone"]) $(id).addEventListener("change", () => {
     const value = $(id).value, allowed = { hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"] }[id];
@@ -4863,7 +5236,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   for (const id of ["numberSize", "numberPosition", "svgRelief"]) $(id).addEventListener("input", () => {
     if (!$(id).validity.valid) return;
     state[id] = Number($(id).value);
-    render();
+    render({ historyGroup: id });
   });
   function updateExportFormatUI() {
     const format = state.exportFormat.toUpperCase();
@@ -4884,6 +5257,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     for (const [id, active] of [["uploadTab", upload], ["presetsTab", !upload]]) {
       $(id).classList.toggle("selected", active);
       $(id).setAttribute("aria-selected", active);
+      $(id).tabIndex = active ? 0 : -1;
     }
   }
   document.querySelectorAll("[data-size]").forEach((b) => b.onclick = () => {
@@ -4909,16 +5283,28 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("angleView").classList.toggle("selected", !front);
   }
   $("frontView").onclick = () => {
+    if (previewMode === "print") {
+      meshView?.setView("front");
+      return;
+    }
     rx = ry = rz = 0;
     view();
   };
   $("angleView").onclick = () => {
+    if (previewMode === "print") {
+      meshView?.setView("angle");
+      return;
+    }
     rx = 12;
     ry = -19;
     rz = -7;
     view();
   };
   $("restoreView").onclick = () => {
+    if (previewMode === "print") {
+      meshView?.setView("angle");
+      return;
+    }
     zoom = 1;
     rx = 12;
     ry = -19;
@@ -4926,15 +5312,24 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     view();
   };
   $("zoomIn").onclick = () => {
+    if (previewMode === "print") {
+      meshView?.zoom(1 / 1.12);
+      return;
+    }
     zoom = Math.min(1.4, zoom + 0.1);
     view();
   };
   $("zoomOut").onclick = () => {
+    if (previewMode === "print") {
+      meshView?.zoom(1.12);
+      return;
+    }
     zoom = Math.max(0.6, zoom - 0.1);
     view();
   };
   var drag = null;
   $("clockStage").onpointerdown = (e) => {
+    if (previewMode === "print") return;
     drag = [e.clientX, e.clientY, rx, ry];
     $("clockStage").setPointerCapture(e.pointerId);
   };
@@ -4953,11 +5348,14 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   };
   $("clockStage").onpointerup = $("clockStage").onpointercancel = () => drag = null;
   $("clockStage").addEventListener("wheel", (e) => {
+    if (previewMode === "print") return;
     e.preventDefault();
     zoom = Math.min(1.4, Math.max(0.6, zoom - e.deltaY * 1e-3));
     scheduleView();
   }, { passive: false });
   $("reset").onclick = () => {
+    setPreviewMode("design");
+    applyingHistory = false;
     importSequence++;
     restorePending = false;
     restoreReference = null;
@@ -4970,7 +5368,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     state = { ...initial };
     customSVG = customArtwork = customImage = null;
     lastDownloadKey = null;
-    for (const id of ["thickness", "hole"]) delete $(id).dataset.editing;
+    for (const id of ["thickness", "hole", "diameterNumber"]) delete $(id).dataset.editing;
     $("svgUpload").value = "";
     $("uploadStatus").textContent = "";
     tab(false);
@@ -4988,6 +5386,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     restorePending = false;
     restoreReference = null;
     importPending = false;
+    applyingHistory = false;
     $("uploadPanel").setAttribute("aria-busy", "false");
     $("export").disabled = !!exportController;
     if (wasLoading) $("uploadStatus").textContent = "SVG loading cancelled.";
@@ -5017,6 +5416,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       button.classList.toggle("selected", button.dataset.artworkId === activeArtwork?.id);
     }
     updateSaveLabel();
+    updateHistoryUI();
   }
   async function refreshGallery() {
     const sequence = ++gallerySequence;
@@ -5058,12 +5458,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     context.drawImage(image, 0, 0, 128, 128);
     return canvas.toDataURL("image/png");
   }
-  function activateArtwork(prepared, record, { useCustom = true, orientation = null } = {}) {
+  function activateArtwork(prepared, record2, { useCustom = true, orientation = null } = {}) {
     customSVG = prepared.markup;
     customArtwork = prepared.artworkMarkup;
     customImage = prepared.image;
-    customRevision++;
-    activeArtwork = { ...record };
+    customRevision = ++revisionCounter;
+    activeArtwork = { ...record2 };
     artworkOrientation = normalizeOrientation(orientation);
     if (useCustom) state.design = "custom";
     render();
@@ -5081,11 +5481,11 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       if (file.size > SVG_IMPORT_MAX_BYTES) throw Error("Please choose an SVG smaller than 5 MB.");
       const source = await file.text(), prepared = await prepareSVG(source);
       if (sequence !== importSequence) return;
-      const record = { id: null, name: file.name, source, size: file.size, thumbnail: thumbnailFor(prepared.image) };
-      activateArtwork(prepared, record);
+      const record2 = { id: null, name: file.name, source, size: file.size, thumbnail: thumbnailFor(prepared.image) };
+      activateArtwork(prepared, record2);
       let saved = false;
       try {
-        const stored = await saveSVG(record);
+        const stored = await saveSVG(record2);
         if (sequence !== importSequence) {
           if (activeArtwork && !activeArtwork.id && activeArtwork.source === stored.source) {
             activeArtwork = { ...stored };
@@ -5116,6 +5516,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         $("export").disabled = !!exportController;
         updateArtworkUI();
         persist();
+        checkpointHistory();
+        updateHistoryUI();
+        scheduleMeshPreview();
       }
     }
   }
@@ -5130,18 +5533,18 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     updateArtworkUI();
     let recordRead = false;
     try {
-      const record = await getSavedSVG(id);
+      const record2 = await getSavedSVG(id);
       if (sequence !== importSequence) return;
-      if (!record) {
+      if (!record2) {
         if (restoring) restoreReference = null;
         throw Error("This saved SVG is no longer available. Choose its original file to import it again.");
       }
       recordRead = true;
-      const prepared = await prepareSVG(record.source);
+      const prepared = await prepareSVG(record2.source);
       if (sequence !== importSequence) return;
       restoreReference = null;
-      activateArtwork(prepared, record, { useCustom, orientation });
-      $("uploadStatus").textContent = `Loaded ${record.name}. Saved on this device.`;
+      activateArtwork(prepared, record2, { useCustom, orientation });
+      $("uploadStatus").textContent = `Loaded ${record2.name}. Saved on this device.`;
       if (useCustom) tab(true);
     } catch (error) {
       if (sequence !== importSequence) return;
@@ -5156,6 +5559,10 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         $("export").disabled = !!exportController;
         updateArtworkUI();
         persist();
+        if (restoring) history.reset(captureSnapshot(), snapshotKey());
+        else checkpointHistory();
+        updateHistoryUI();
+        scheduleMeshPreview();
       }
     }
   }
@@ -5204,7 +5611,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       if (removed.id) await deleteSavedSVG(removed.id);
       activeArtwork = null;
       customSVG = customArtwork = customImage = null;
-      customRevision++;
+      customRevision = ++revisionCounter;
       restoreReference = null;
       artworkOrientation = normalizeOrientation(null);
       if (state.design === "custom") state.design = "petal";
@@ -5219,7 +5626,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       persist();
     }
   };
-  function meshAsync(alpha, n, settings, signal, cachedSTL = null, artwork = null) {
+  function meshAsync(alpha, n, settings, signal, cachedSTL = null, artwork = null, onStage = () => {
+  }, cachedStats = null) {
     return new Promise((resolve, reject) => {
       let worker = null, timer = null, settled = false, fallingBack = false;
       const clean = () => {
@@ -5243,9 +5651,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
           if (settled) return;
           try {
             signal.throwIfAborted();
-            const mesh = cachedSTL || makeClockSTL(alpha, n, settings, void 0, artwork);
+            const mesh = cachedSTL || makeClockSTL(alpha, n, settings, void 0, artwork), stats = cachedStats || analyzeSTL(mesh);
             const buffer = settings.exportFormat === "3mf" ? stlTo3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor, artwork: artwork?.texture }) : mesh;
-            finish(null, { buffer, stlBuffer: mesh });
+            finish(null, { buffer, stlBuffer: mesh, stats });
           } catch (error) {
             finish(error);
           }
@@ -5264,8 +5672,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
             finish(new Error(data.error));
             return;
           }
-          if (data.stage) $("exportStatus").textContent = data.stage === "outline" ? "Smoothing your outline…" : data.stage === "details" ? "Adding your surface details…" : data.stage === "package" ? "Preparing your 3MF file…" : "Finishing your print file…";
-          if (data.buffer) finish(null, { buffer: data.buffer, stlBuffer: data.stlBuffer || data.buffer });
+          if (data.stage) onStage(data.stage);
+          if (data.buffer) finish(null, { buffer: data.buffer, stlBuffer: data.stlBuffer || data.buffer, stats: data.stats });
         };
         worker.onerror = (event) => {
           event.preventDefault();
@@ -5276,7 +5684,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         const transfers = [copy];
         if (transferredArtwork?.rgba) transfers.push(transferredArtwork.rgba.buffer);
         if (transferredArtwork?.texture) transfers.push(transferredArtwork.texture.png.buffer);
-        worker.postMessage({ id: 1, ...cachedSTL ? { stlBuffer: copy } : { alpha: copy }, n, settings, artwork: transferredArtwork }, transfers);
+        worker.postMessage({ id: 1, ...cachedSTL ? { stlBuffer: copy } : { alpha: copy }, n, settings, artwork: transferredArtwork, stats: cachedStats }, transfers);
         timer = setTimeout(fallback, 6e4);
       } catch {
         fallback();
@@ -5315,10 +5723,305 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     }
     context.restore();
   }
+  function designSnapshot() {
+    const settings = { ...state, faceColor: colors[state.color][1] };
+    return { settings, geometry: geometryKey(settings), image: customImage, placement: [...artworkOrientation] };
+  }
+  async function ensureMesh(snapshot, signal, onStage = () => {
+  }) {
+    const { settings, geometry, image, placement } = snapshot;
+    const result = await meshStore.get(geometry, async (jobSignal, stage) => {
+      jobSignal.throwIfAborted();
+      stage("outline");
+      const n = Math.ceil(settings.diameter / 0.15), canvas = document.createElement("canvas");
+      canvas.width = canvas.height = n;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.scale(n / 400, n / 400);
+      if (settings.design === "custom") drawPlacedArtwork(ctx, image, placement);
+      else {
+        ctx.fillStyle = "#fff";
+        ctx.fill(new Path2D(outlines.get(settings.design)));
+      }
+      const pixels = ctx.getImageData(0, 0, n, n).data, alpha = new Uint8Array(n * n);
+      for (let i2 = 0; i2 < alpha.length; i2++) alpha[i2] = pixels[i2 * 4 + 3];
+      let artwork = null;
+      if (originalArtwork(settings)) {
+        paintHourDetails(ctx, settings);
+        const png = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        jobSignal.throwIfAborted();
+        if (!png) throw Error("The SVG color artwork could not be prepared.");
+        artwork = { rgba: pixels, texture: { png: new Uint8Array(await png.arrayBuffer()), frame: artworkFrame(alpha, n, settings.diameter), thickness: settings.thickness } };
+      }
+      jobSignal.throwIfAborted();
+      const mesh = await meshAsync(alpha, n, { ...settings, exportFormat: "stl" }, jobSignal, null, artwork, stage);
+      return { stlBuffer: mesh.stlBuffer, stats: mesh.stats, artwork: artwork ? { texture: artwork.texture } : null };
+    }, { signal, onStage });
+    updatePrintSummary();
+    return result;
+  }
+  var stageMessage = (stage) => ({ outline: "Tracing the clock outline…", details: "Adding the printable details…", mesh: "Closing the print mesh…", package: "Preparing your 3MF file…" })[stage] || "Checking your model…";
+  function updatePrintSummary() {
+    const key = geometryKey(), result = meshStore.peek(key), stats = result?.stats;
+    if (checkController && key !== checkKey) checkController.abort();
+    $("modelDimensions").textContent = stats ? stats.dimensions.map((value) => Number(value.toFixed(1))).join(" × ") : `${state.diameter} mm span`;
+    $("modelVolume").textContent = stats ? (stats.volume / 1e3).toFixed(1) : "—";
+    $("modelParts").textContent = stats ? String(stats.components) : "—";
+    $("printCheckStatus").textContent = stats ? stats.components > 1 ? `${stats.components} separate pieces. Plan a backing or assembly before printing.` : "Closed print mesh checked. Add the movement and hands after printing." : "Check the model to see its exact dimensions, relief, and separate parts.";
+    $("printCheckStatus").dataset.tone = stats ? stats.components > 1 ? "warning" : "success" : "neutral";
+    $("printCheckStatus").dataset.checked = String(!!stats);
+    const valid = [$("bedWidth"), $("bedDepth")].every((input) => input.value !== "" && input.validity.valid);
+    const fit = stats ? bedFit(stats.dimensions, bed.width, bed.depth) : null;
+    $("bedLabel").textContent = `${bed.width} × ${bed.depth} mm${valid && fit ? fit.fits ? " · Fits" : " · Too small" : ""}`;
+    $("bedLabel").dataset.tone = valid && fit ? fit.fits ? "success" : "warning" : "neutral";
+    if (stats && valid && !fit.fits) {
+      $("printCheckStatus").textContent = `${stats.components > 1 ? stats.components + " separate pieces." : "Closed mesh checked."} Too large for your ${bed.width} × ${bed.depth} mm build plate.`;
+      $("printCheckStatus").dataset.tone = "warning";
+    }
+    $("bedStatus").textContent = !valid ? "Enter build plate dimensions from 80 to 500 mm." : !fit ? "Check the model to verify its fit on this build plate." : fit.fits ? fit.rotated ? "Fits after a quarter turn on the build plate." : "Fits on your build plate." : "This model is larger than your build plate. Reduce its size or choose a larger printer.";
+    $("bedStatus").dataset.tone = valid && fit ? fit.fits ? "success" : "warning" : "neutral";
+    $("fitToBed").hidden = !valid || !fit || fit.fits;
+    if (meshView) meshView.setBed(bed.width, bed.depth, fit?.fits !== false, $("meshBed").checked);
+  }
+  for (const [id, key] of [["bedWidth", "width"], ["bedDepth", "depth"]]) {
+    $(id).value = bed[key];
+    $(id).addEventListener("input", () => {
+      if ([$("bedWidth"), $("bedDepth")].every((input) => input.value !== "" && input.validity.valid)) {
+        bed = { width: Number($("bedWidth").value), depth: Number($("bedDepth").value) };
+        try {
+          localStorage.setItem("clock-factory-bed", JSON.stringify(bed));
+        } catch {
+        }
+      }
+      updatePrintSummary();
+    });
+  }
+  $("fitToBed").onclick = () => {
+    const stats = meshStore.peek(geometryKey())?.stats;
+    if (!stats) return;
+    const [x2, y] = stats.dimensions, scale = Math.max(Math.min((bed.width - 4) / x2, (bed.depth - 4) / y), Math.min((bed.width - 4) / y, (bed.depth - 4) / x2));
+    const diameter = Math.min(300, Math.floor(state.diameter * scale));
+    if (diameter < 100) {
+      toast("This design needs a larger build plate at the minimum 100 mm size.");
+      return;
+    }
+    state.diameter = diameter;
+    render({ forceInputs: true });
+    toast(`Resized to ${diameter} mm, with space around the print.`);
+  };
+  $("checkModel").onclick = async () => {
+    if (checkController || importPending || restorePending || deletingArtwork || !validateDimensions(true)) return;
+    const controller = new AbortController(), snapshot = designSnapshot();
+    checkController = controller;
+    checkKey = snapshot.geometry;
+    $("checkModel").disabled = true;
+    $("checkModel").textContent = "Checking…";
+    try {
+      await ensureMesh(snapshot, controller.signal, (stage) => {
+        if (snapshot.geometry === geometryKey()) $("printCheckStatus").textContent = stageMessage(stage);
+      });
+    } catch (error) {
+      if (error.name !== "AbortError") toast("Could not check model: " + error.message);
+    } finally {
+      if (checkController === controller) {
+        checkController = null;
+        $("checkModel").disabled = false;
+        $("checkModel").textContent = "Check model";
+        updatePrintSummary();
+      }
+    }
+  };
+  function setPreviewMode(mode) {
+    previewMode = mode;
+    for (const [id, active] of [["designPreview", mode === "design"], ["printPreview", mode === "print"]]) {
+      $(id).classList.toggle("selected", active);
+      $(id).setAttribute("aria-selected", String(active));
+      $(id).tabIndex = active ? 0 : -1;
+    }
+    $("preview").dataset.mode = mode;
+    $("clockObject").hidden = $("clockShadow").hidden = $("measureLine").hidden = mode === "print";
+    $("showHandsRow").hidden = mode === "print";
+    $("meshOptions").hidden = mode !== "print";
+    $("previewBadge").textContent = mode === "print" ? "Actual print model" : "Design preview";
+    if (mode === "design") {
+      clearTimeout(meshPreviewTimer);
+      meshPreviewTimer = null;
+      meshPreviewController?.abort();
+      meshPreviewController = null;
+      meshPreviewKey = null;
+      $("meshCanvas").hidden = $("meshState").hidden = true;
+      meshView?.setVisible(false);
+    } else scheduleMeshPreview(true);
+  }
+  function scheduleMeshPreview(immediate = false) {
+    if (previewMode !== "print") return;
+    const snapshot = designSnapshot(), key = snapshot.geometry;
+    if (importPending || restorePending || deletingArtwork) {
+      clearTimeout(meshPreviewTimer);
+      meshPreviewTimer = null;
+      meshPreviewController?.abort();
+      meshPreviewController = null;
+      meshPreviewKey = null;
+      $("meshCanvas").hidden = true;
+      $("meshState").hidden = false;
+      $("meshStateText").textContent = "Opening your artwork…";
+      return;
+    }
+    if (key === loadedMeshKey && meshView) {
+      clearTimeout(meshPreviewTimer);
+      meshPreviewTimer = null;
+      meshPreviewController?.abort();
+      meshPreviewController = null;
+      meshPreviewKey = key;
+      meshView.setAppearance(snapshot.settings.faceColor, $("meshColors").checked, $("meshWireframe").checked);
+      $("meshState").hidden = true;
+      $("meshCanvas").hidden = false;
+      meshView.setVisible(true);
+      return;
+    }
+    if (key === meshPreviewKey && (meshPreviewController || meshPreviewTimer)) return;
+    clearTimeout(meshPreviewTimer);
+    meshPreviewController?.abort();
+    meshPreviewKey = key;
+    meshView?.setVisible(false);
+    $("meshCanvas").hidden = true;
+    $("meshState").hidden = false;
+    $("meshRetry").hidden = true;
+    $("meshStateText").textContent = "Preparing your printable model…";
+    $("meshState").dataset.loading = "true";
+    meshPreviewTimer = setTimeout(async () => {
+      meshPreviewTimer = null;
+      const controller = new AbortController();
+      meshPreviewController = controller;
+      try {
+        const result = await ensureMesh(snapshot, controller.signal, (stage) => {
+          if (!controller.signal.aborted) $("meshStateText").textContent = stageMessage(stage);
+        });
+        controller.signal.throwIfAborted();
+        if (previewMode !== "print" || key !== geometryKey()) return;
+        if (!meshView) {
+          const { PrintView } = await import(meshViewURL.href);
+          controller.signal.throwIfAborted();
+          meshView = new PrintView($("meshCanvas"), { onError: (error) => {
+            meshView?.dispose();
+            meshView = null;
+            loadedMeshKey = null;
+            $("meshCanvas").hidden = true;
+            $("meshState").hidden = false;
+            $("meshStateText").textContent = error.message;
+            $("meshRetry").hidden = false;
+          } });
+        }
+        await meshView.setModel(result, snapshot.settings, { signal: controller.signal });
+        controller.signal.throwIfAborted();
+        if (previewMode !== "print" || key !== geometryKey()) return;
+        loadedMeshKey = key;
+        $("meshCanvas").dataset.geometryKey = key;
+        $("meshCanvas").dataset.triangles = String(result.stats.triangles);
+        $("meshCanvas").hidden = false;
+        $("meshState").hidden = true;
+        meshView.setAppearance(colors[state.color][1], $("meshColors").checked, $("meshWireframe").checked);
+        meshView.setVisible(true);
+        updatePrintSummary();
+      } catch (error) {
+        if (error.name !== "AbortError" && previewMode === "print" && key === geometryKey()) {
+          $("meshState").hidden = false;
+          $("meshState").dataset.loading = "false";
+          $("meshStateText").textContent = meshStore.peek(key) ? "The print model is checked, but 3D graphics are unavailable on this device. You can still download your model." : `Could not prepare this model: ${error.message}`;
+          $("meshRetry").hidden = false;
+          meshPreviewKey = null;
+        }
+      } finally {
+        if (meshPreviewController === controller) meshPreviewController = null;
+      }
+    }, immediate ? 0 : 400);
+  }
+  $("designPreview").onclick = () => setPreviewMode("design");
+  $("printPreview").onclick = () => setPreviewMode("print");
+  $("meshRetry").onclick = () => {
+    loadedMeshKey = meshPreviewKey = null;
+    scheduleMeshPreview(true);
+  };
+  for (const id of ["meshColors", "meshWireframe"]) $(id).onchange = () => meshView?.setAppearance(colors[state.color][1], $("meshColors").checked, $("meshWireframe").checked);
+  $("meshBed").onchange = updatePrintSummary;
+  $("openProject").onclick = () => $("projectUpload").click();
+  $("saveProject").onclick = () => {
+    if (importPending || restorePending || deletingArtwork) return;
+    try {
+      const text = serializeProject(state, activeArtwork, artworkOrientation), url = URL.createObjectURL(new Blob([text], { type: "application/json" })), link = document.createElement("a");
+      link.href = url;
+      link.download = projectFilename(state.projectName);
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1e4);
+      toast("Project saved with your settings and original SVG. Open the .clock file to continue on another device.");
+    } catch (error) {
+      toast("Could not save project: " + error.message);
+    }
+  };
+  $("projectUpload").onchange = async (event) => {
+    const file = event.target.files[0];
+    event.target.value = "";
+    if (!file || deletingArtwork) return;
+    cancelRestoration();
+    const sequence = ++importSequence;
+    importPending = true;
+    updateArtworkUI();
+    try {
+      if (file.size > MAX_PROJECT_BYTES) throw Error("Choose a project smaller than 12 MB.");
+      const project = parseProject(await file.text()), prepared = project.artwork ? await prepareSVG(project.artwork.source) : null;
+      if (sequence !== importSequence) return;
+      state = { ...project.settings };
+      artworkOrientation = project.orientation;
+      if (prepared) {
+        customSVG = prepared.markup;
+        customArtwork = prepared.artworkMarkup;
+        customImage = prepared.image;
+        activeArtwork = { ...project.artwork, id: null, size: new TextEncoder().encode(project.artwork.source).byteLength, thumbnail: thumbnailFor(prepared.image) };
+      } else {
+        customSVG = customArtwork = customImage = null;
+        activeArtwork = null;
+      }
+      customRevision = ++revisionCounter;
+      render({ forceInputs: true });
+      tab(state.design === "custom");
+      if (activeArtwork) {
+        try {
+          const saved = await saveSVG(activeArtwork);
+          if (sequence !== importSequence) return;
+          activeArtwork = saved;
+        } catch (error) {
+          if (sequence !== importSequence) return;
+          $("uploadStatus").textContent = error.message;
+        }
+      }
+      if (sequence !== importSequence) return;
+      if (activeArtwork) $("uploadStatus").textContent = `Loaded ${activeArtwork.name}. ${activeArtwork.id ? "Saved on this device." : "Available for this session."}`;
+      toast(`Opened ${state.projectName}. Your settings and artwork are restored.`);
+      refreshGallery();
+    } catch (error) {
+      if (sequence === importSequence) toast("Could not open project: " + error.message);
+    } finally {
+      if (sequence === importSequence) {
+        importPending = false;
+        updateArtworkUI();
+        persist();
+        checkpointHistory();
+        updateHistoryUI();
+        updatePrintSummary();
+        scheduleMeshPreview();
+      }
+    }
+  };
+  window.addEventListener("pagehide", () => {
+    meshPreviewController?.abort();
+    checkController?.abort();
+    meshView?.dispose();
+  });
   $("cancelExport").onclick = () => exportController?.abort();
   $("export").onclick = async () => {
     if (importPending || deletingArtwork || restorePending || exportController || !validateDimensions(true)) return;
-    const settings = { ...state, faceColor: colors[state.color][1] }, geometry = geometryKey(settings), key = fileKey(settings), image = customImage, placement = [...artworkOrientation];
+    const snapshot = designSnapshot(), settings = snapshot.settings, key = fileKey(settings);
     if (exportCache?.key === key) {
       downloadClock(exportCache.blob, settings, key);
       return;
@@ -5334,34 +6037,15 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     await new Promise((r) => setTimeout(r, 0));
     try {
       controller.signal.throwIfAborted();
-      const cachedSTL = meshCache?.key === geometry ? meshCache.buffer : null;
-      let alpha = null, n = 0, artwork = cachedSTL ? meshCache.artwork : null;
-      if (!cachedSTL) {
-        n = Math.ceil(settings.diameter / 0.15);
-        const canvas = document.createElement("canvas");
-        canvas.width = canvas.height = n;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        ctx.scale(n / 400, n / 400);
-        if (settings.design === "custom") drawPlacedArtwork(ctx, image, placement);
-        else {
-          ctx.fillStyle = "#fff";
-          ctx.fill(new Path2D(outlines.get(settings.design)));
-        }
-        const pixels = ctx.getImageData(0, 0, n, n).data;
-        alpha = new Uint8Array(n * n);
-        for (let i2 = 0; i2 < alpha.length; i2++) alpha[i2] = pixels[i2 * 4 + 3];
-        if (originalArtwork(settings)) {
-          paintHourDetails(ctx, settings);
-          const png = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-          if (!png) throw Error("The SVG color artwork could not be prepared.");
-          artwork = { rgba: pixels, texture: { png: new Uint8Array(await png.arrayBuffer()), frame: artworkFrame(alpha, n, settings.diameter), thickness: settings.thickness } };
-        }
-      }
+      const onStage = (stage) => {
+        $("exportStatus").textContent = stageMessage(stage);
+        const progress = $("exportProgress").querySelector("progress");
+        progress.max = 100;
+        progress.value = { outline: 15, details: 40, mesh: 70, package: 90 }[stage] || 5;
+      };
+      const mesh = await ensureMesh(snapshot, controller.signal, onStage);
+      const result = settings.exportFormat === "3mf" ? await meshAsync(null, 0, settings, controller.signal, mesh.stlBuffer, mesh.artwork, onStage, mesh.stats) : { buffer: mesh.stlBuffer };
       controller.signal.throwIfAborted();
-      $("exportStatus").textContent = "Creating your print file… You can keep designing.";
-      const result = await meshAsync(alpha, n, settings, controller.signal, cachedSTL, artwork);
-      controller.signal.throwIfAborted();
-      meshCache = { key: geometry, buffer: result.stlBuffer, artwork: artwork ? { texture: artwork.texture } : null };
       const blob = new Blob([result.buffer], { type: settings.exportFormat === "3mf" ? "model/3mf" : "model/stl" });
       exportCache = { key, blob };
       downloadClock(blob, settings, key);
@@ -5372,6 +6056,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       exportController = null;
       button.disabled = importPending || deletingArtwork || restorePending;
       updateExportFormatUI();
+      validateDimensions();
       $("exportProgress").hidden = true;
       $("printSection").setAttribute("aria-busy", "false");
     }

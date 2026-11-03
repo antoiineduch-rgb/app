@@ -6,9 +6,13 @@ import { makeClockSTL } from './mesh.js';
 import { hourNumeralMarkup } from './hour-numerals.js';
 import { stlTo3MF } from './export-3mf.js';
 import { artworkFrame } from './svg-details.js';
+import { DEFAULT_SETTINGS,normalizeSettings,projectName,parseProject,serializeProject,projectFilename,MAX_PROJECT_BYTES } from './project.js';
+import { DesignHistory } from './history.js';
+import { MeshStore } from './mesh-store.js';
+import { analyzeSTL,bedFit } from './mesh-analysis.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
-const initial={design:'petal',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true,hourStyle:'ticks',numberSize:100,numberPosition:100,exportFormat:'stl',svgDetail:'artwork',svgRelief:.8,svgTone:'contrast'};
+const initial=DEFAULT_SETTINGS;
 let state={...initial};
 let artworkOrientation=normalizeOrientation(null),restoreReference=null,restorePending=false;
 try{
@@ -16,19 +20,21 @@ try{
   const artworkId=typeof saved?.artworkId==='string'&&saved.artworkId.length<=128?saved.artworkId:null;
   const validDesign=saved&&(designs.some(d=>d.id===saved.design)||(saved.design==='custom'&&artworkId));
   if(validDesign&&Number.isInteger(saved.color)&&colors[saved.color]&&['smooth','ripple','grain'].includes(saved.texture)){
-    state={...initial,design:saved.design==='custom'?'petal':saved.design,color:saved.color,texture:saved.texture,markers:typeof saved.markers==='boolean'?saved.markers:true,hourStyle:['ticks','arabic','roman'].includes(saved.hourStyle)?saved.hourStyle:'ticks',exportFormat:saved.exportFormat==='3mf'?'3mf':'stl',svgDetail:saved.svgDetail==='silhouette'?'silhouette':'artwork',svgTone:['contrast','dark','light'].includes(saved.svgTone)?saved.svgTone:'contrast'};
-    for(const [key,min,max,step]of[['diameter',100,300,10],['thickness',2,10,.5],['hole',5,15,.5],['numberSize',70,130,5],['numberPosition',80,120,5],['svgRelief',0,2,.2]]){
-      const value=Number(saved[key]);state[key]=Number.isFinite(value)?Math.min(max,Math.max(min,Math.round(value/step)*step)):initial[key];
-    }
+    state=normalizeSettings(saved);if(state.design==='custom')state.design='petal';
     artworkOrientation=normalizeOrientation(saved.artworkOrientation);
     if(artworkId){restoreReference={id:artworkId,useCustom:saved.design==='custom',orientation:[...artworkOrientation]};restorePending=true;}
   }
 }catch{}
 let activeArtwork=null,gallerySequence=0,deletingArtwork=false,settingsSaved=true;
-let customSVG=null,customArtwork=null,customImage=null,customRevision=0,importSequence=0,importPending=false,zoom=1,rx=12,ry=-19,rz=-7;
+let customSVG=null,customArtwork=null,customImage=null,customRevision=0,revisionCounter=0,importSequence=0,importPending=false,zoom=1,rx=12,ry=-19,rz=-7;
 const outlines=new Map(designs.map(d=>[d.id,shapePath(d.id)]));
 const workerURL=new URL('./export-worker.js',document.currentScript?.src||location.href);
-let toastTimer,saveTimer,previewKey='',exportCache=null,meshCache=null,lastDownloadKey=null,exportController=null;
+const meshViewURL=new URL('./mesh-view.js',document.currentScript?.src||location.href);
+const history=new DesignHistory(),meshStore=new MeshStore(2);
+let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null,applyingHistory=false;
+let previewMode='design',meshView=null,loadedMeshKey=null,meshPreviewKey=null,meshPreviewController=null,meshPreviewTimer=null,checkController=null,checkKey=null;
+let bed={width:220,depth:220};
+try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500))bed=saved;}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
 function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null]);}
 function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?colors[settings.color][1]:null]);}
@@ -50,14 +56,14 @@ function persist(){clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,200);}
 window.addEventListener('pagehide',flushSave);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)flushSave();});
 function faceMarkup(){return customSVG&&state.design==='custom'?`<g transform="${placementTransform(artworkOrientation)}">${customSVG}</g>`:`<path d="${outlines.get(state.design)||outlines.get('petal')}"/>`;}
-function render({forceInputs=false}={}){
+function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   const color=colors[state.color][1],detailed=originalArtwork();
   const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,state.hourStyle,state.numberSize,state.numberPosition,state.diameter,state.svgDetail,customRevision,artworkOrientation]);
   if(nextPreviewKey!==previewKey){
   let ticks='',numberClearance='';
   if(state.markers&&state.hourStyle!=='ticks'){ticks=`<g id="hourNumerals" fill="#f5e5cd">${hourNumeralMarkup(state)}</g>`;numberClearance=`<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2*400/state.diameter}" stroke-linejoin="round">${hourNumeralMarkup(state)}</g></mask>`;}
   if(state.markers&&state.hourStyle==='ticks')for(let i=0;i<12;i++)ticks+=`<rect x="197.5" y="76" width="5" height="${i%3===0?17:10}" rx="2" transform="rotate(${i*30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
-  $('clockSvg').innerHTML=`<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance?' mask="url(#numberClearanceMask)"':''}>${state.texture==='ripple'?Array.from({length:44},(_,i)=>`<circle cx="200" cy="200" r="${12+i*4}" fill="none" stroke="${i%2?'#fff0da':'#774832'}" stroke-opacity="${i%2?'.18':'.23'}" stroke-width=".8"/>`).join(''):state.texture==='grain'?'<rect width="400" height="400" fill="url(#ridges)"/>':''}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
+  $('clockSvg').innerHTML=`<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance?' mask="url(#numberClearanceMask)"':''}>${state.texture==='ripple'?Array.from({length:44},(_,i)=>`<circle cx="200" cy="200" r="${12+i*4}" fill="none" stroke="${i%2?'#fff0da':'#774832'}" stroke-opacity="${i%2?'.18':'.23'}" stroke-width=".8"/>`).join(''):state.texture==='grain'?'<rect width="400" height="400" fill="url(#ridges)"/>':''}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g id="previewHands" style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
   if(detailed){
     const painted=document.createElementNS('http://www.w3.org/2000/svg','g');
     painted.id='originalArtwork';painted.setAttribute('transform',placementTransform(artworkOrientation));painted.innerHTML=customArtwork;
@@ -75,7 +81,7 @@ function render({forceInputs=false}={}){
     else if(forceInputs||id==='diameter'||(document.activeElement!==input&&!input.dataset.editing))input.value=state[id];
   });
   $('diameterValue').textContent=state.diameter;$('diameter').setAttribute('aria-valuetext',`${state.diameter/10} centimeters across`);$('colorName').textContent=colors[state.color][0];$('measure').textContent=state.diameter+' mm';
-  $('exportSize').textContent=`${state.diameter} mm across · ${state.thickness} mm thick`;
+  $('exportSize').textContent=`${state.diameter} mm across · ${state.thickness} mm base`;
   $('sizeHint').textContent=`${state.diameter/10} cm across — ${state.diameter<=160?'a compact clock for a shelf or desk.':state.diameter<=220?'a lovely size for a desk or small wall.':'a statement piece for your wall. Check your printer’s bed size.'}`;
   document.querySelectorAll('[data-size]').forEach(b=>{const active=Number(b.dataset.size)===state.diameter;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',active);});
   $('downloadGuide').hidden=lastDownloadKey!==fileKey();
@@ -91,21 +97,73 @@ function render({forceInputs=false}={}){
   $('designTitle').innerHTML=d?`The ${d.name} Clock <span>↗</span>`:'Your Custom Clock <span>↗</span>';
   $('designDescription').textContent=d?.description||'Your own shape. Your own sense of time.';
   $('clockObject').style.filter=`drop-shadow(3px ${Math.round(state.thickness*1.5)}px 0 ${color} ) drop-shadow(9px 19px 12px #726b4f30)`;
-  updateArtworkUI();persist();
+  if(forceInputs||(document.activeElement!==$('diameterNumber')&&!$('diameterNumber').dataset.editing))$('diameterNumber').value=state.diameter;
+  if(forceInputs||document.activeElement!==$('projectName'))$('projectName').value=state.projectName;
+  $('showHands').checked=state.showHands;const hands=$('clockSvg').querySelector('#previewHands');if(hands)hands.toggleAttribute('hidden',!state.showHands);
+  updateArtworkUI();validateDimensions();persist();
+  if(recordHistory)checkpointHistory(historyGroup);updateHistoryUI();updatePrintSummary();scheduleMeshPreview();
 }
+function captureSnapshot(){return {settings:{...state},orientation:[...artworkOrientation],artwork:activeArtwork?{...activeArtwork}:null,mask:customSVG,paint:customArtwork,image:customImage,revision:customRevision};}
+function snapshotKey(){return JSON.stringify([state,artworkOrientation,activeArtwork?customRevision:null]);}
+function checkpointHistory(group=null){if(!importPending&&!restorePending&&!applyingHistory)history.commit(captureSnapshot(),snapshotKey(),{group});}
+function updateHistoryUI(){
+  const busy=importPending||restorePending||deletingArtwork||applyingHistory;
+  $('undo').disabled=busy||!history.canUndo;$('redo').disabled=busy||!history.canRedo;
+  $('openProject').disabled=$('saveProject').disabled=busy;$('projectUpload').disabled=busy;
+}
+async function restoreHistory(action){
+  if(importPending||restorePending||deletingArtwork||applyingHistory)return;
+  const snapshot=history[action]();if(!snapshot)return;
+  const sequence=++importSequence;applyingHistory=true;importPending=!!snapshot.artwork;
+  restoreReference=null;restorePending=false;state={...snapshot.settings};artworkOrientation=[...snapshot.orientation];
+  customSVG=snapshot.mask;customArtwork=snapshot.paint;customImage=snapshot.image;customRevision=snapshot.revision;
+  activeArtwork=snapshot.artwork?{...snapshot.artwork,id:null}:null;
+  for(const id of ['thickness','hole','diameterNumber'])delete $(id).dataset.editing;
+  tab(state.design==='custom');render({forceInputs:true,recordHistory:false});
+  try{if(activeArtwork){const saved=await saveSVG(activeArtwork);if(sequence===importSequence)activeArtwork=saved;}}
+  catch(error){if(sequence===importSequence)$('uploadStatus').textContent=error.message;}
+  finally{if(sequence===importSequence){applyingHistory=false;importPending=false;render({forceInputs:true,recordHistory:false});refreshGallery();toast(action==='undo'?'Previous design restored.':'Design change restored.');}}
+}
+$('undo').onclick=()=>restoreHistory('undo');$('redo').onclick=()=>restoreHistory('redo');
+$('projectName').addEventListener('input',()=>{state.projectName=$('projectName').value;render({historyGroup:'projectName'});});
+$('projectName').addEventListener('blur',()=>{state.projectName=projectName(state.projectName);render();history.endGroup();});
+document.addEventListener('change',event=>{if(event.target.matches('input[type="range"]'))history.endGroup();});
+$('showHands').onchange=()=>{state.showHands=$('showHands').checked;render();};
+try{$('welcome').hidden=localStorage.getItem('clock-factory-welcome-hidden')==='true';}catch{}
+$('dismissWelcome').onclick=()=>{$('welcome').hidden=true;try{localStorage.setItem('clock-factory-welcome-hidden','true');}catch{}};
+for(const list of document.querySelectorAll('[role="tablist"]'))list.addEventListener('keydown',event=>{
+  if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+  const tabs=[...list.querySelectorAll('[role="tab"]')],index=tabs.indexOf(document.activeElement);if(index<0)return;
+  event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowLeft'?-1:1)+tabs.length)%tabs.length;
+  tabs[next].focus();tabs[next].click();
+});
+document.addEventListener('keydown',event=>{
+  if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
+  const key=event.key.toLowerCase(),editing=event.target instanceof Element&&event.target.closest('textarea,[contenteditable="true"],input:not([type="range"]):not([type="checkbox"])');
+  if(key==='s'){event.preventDefault();$('saveProject').click();}
+  else if(key==='o'){event.preventDefault();$('openProject').click();}
+  else if(!editing&&(key==='z'||key==='y')){event.preventDefault();restoreHistory(key==='y'||event.shiftKey?'redo':'undo');}
+});
 designs.forEach(d=>{const b=document.createElement('button');b.className='design-card';b.dataset.design=d.id;b.innerHTML=`<svg viewBox="0 0 400 400" aria-hidden="true"><path d="${outlines.get(d.id)}" fill="${d.id==='petal'?'#bf977b':'#c5c9b6'}"/><path d="M200 130V200L245 227" fill="none" stroke="#f7f5e9" stroke-width="10" stroke-linecap="round"/></svg>${d.name}`;b.onclick=()=>{cancelRestoration();state.design=d.id;render();};$('designGrid').append(b);});
 colors.forEach(([name,color],i)=>{const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=name;b.setAttribute('aria-label',name);b.onclick=()=>{state.color=i;render();};$('swatches').append(b);});
 document.querySelectorAll('[data-texture]').forEach(b=>b.onclick=()=>{state.texture=b.dataset.texture;render();});
 function validateDimensions(focus=false){
-  const invalid=['thickness','hole'].map($).find(input=>input.value===''||!input.validity.valid);
-  for(const id of ['thickness','hole'])$(id).setAttribute('aria-invalid',String($(id).value===''||!$(id).validity.valid));
-  $('dimensionError').hidden=!invalid;
+  const ids=['diameterNumber','thickness','hole'],invalid=ids.map($).find(input=>input.value===''||!input.validity.valid);
+  for(const id of ids)$(id).setAttribute('aria-invalid',String($(id).value===''||!$(id).validity.valid));
+  $('dimensionError').hidden=!invalid||invalid.id==='diameterNumber';$('sizeError').hidden=!invalid||invalid.id!=='diameterNumber';
   if(invalid){
-    $('dimensionError').textContent=`Enter ${invalid.id==='hole'?'a center hole from 5 to 15':'a face thickness from 2 to 10'} mm, in steps of 0.5 mm.`;
-    if(focus){document.querySelector('.advanced-settings').open=true;invalid.focus();}
+    const size=invalid.id==='diameterNumber';
+    $(size?'sizeError':'dimensionError').textContent=size?'Enter a diameter from 100 to 300 mm, in steps of 1 mm.':`Enter ${invalid.id==='hole'?'a center hole from 5 to 15':'a face thickness from 2 to 10'} mm, in steps of 0.5 mm.`;
+    if(focus){if(!size)document.querySelector('.advanced-settings').open=true;invalid.focus();}
   }
+  $('export').disabled=!!invalid||importPending||deletingArtwork||restorePending||!!exportController;
   return !invalid;
 }
+$('diameterNumber').addEventListener('input',()=>{
+  $('diameterNumber').dataset.editing='true';if(!validateDimensions())return;
+  state.diameter=Number($('diameterNumber').value);render({historyGroup:'diameter'});
+});
+$('diameterNumber').addEventListener('blur',()=>{if(validateDimensions())delete $('diameterNumber').dataset.editing;});
 ['diameter','thickness','hole','markers'].forEach(id=>$(id).addEventListener('input',()=>{
   const input=$(id);
   if(id==='markers')state[id]=input.checked;
@@ -114,14 +172,14 @@ function validateDimensions(focus=false){
     if(!input.validity.valid||input.value===''){validateDimensions();return;}
     state[id]=Number(input.value);
   }
-  validateDimensions();render();
+  validateDimensions();render({historyGroup:id==='markers'?null:id});
 }));
 for(const id of ['hourStyle','exportFormat','svgDetail','svgTone'])$(id).addEventListener('change',()=>{
   const value=$(id).value,allowed={hourStyle:['ticks','arabic','roman'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light']}[id];
   if(!allowed.includes(value))return;state[id]=value;render();
 });
 for(const id of ['numberSize','numberPosition','svgRelief'])$(id).addEventListener('input',()=>{
-  if(!$(id).validity.valid)return;state[id]=Number($(id).value);render();
+  if(!$(id).validity.valid)return;state[id]=Number($(id).value);render({historyGroup:id});
 });
 function updateExportFormatUI(){
   const format=state.exportFormat.toUpperCase();$('exportFormat').value=state.exportFormat;
@@ -130,34 +188,36 @@ function updateExportFormatUI(){
   if(!exportController)$('export').innerHTML=`Download ${format} <span>↓</span>`;
 }
 for(const id of ['thickness','hole'])$(id).addEventListener('blur',()=>{if(validateDimensions()){delete $(id).dataset.editing;$(id).value=state[id];}});
-function tab(upload){$('uploadPanel').hidden=!upload;$('presetPanel').hidden=upload;for(const [id,active]of[['uploadTab',upload],['presetsTab',!upload]]){$(id).classList.toggle('selected',active);$(id).setAttribute('aria-selected',active);}}
+function tab(upload){$('uploadPanel').hidden=!upload;$('presetPanel').hidden=upload;for(const [id,active]of[['uploadTab',upload],['presetsTab',!upload]]){$(id).classList.toggle('selected',active);$(id).setAttribute('aria-selected',active);$(id).tabIndex=active?0:-1;}}
 document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{state.diameter=Number(b.dataset.size);render();});
 $('showGuide').onclick=()=>$('helpDialog').showModal();
 $('uploadTab').onclick=()=>tab(true);$('presetsTab').onclick=()=>tab(false);
 $('designNav').onclick=()=>{tab(false);$('designGrid').scrollIntoView({behavior:'smooth',block:'center'});toast('Six shapes. Endless possibilities. Pick your starting point.');};
 $('editorLink').onclick=e=>{e.preventDefault();window.scrollTo({top:0,behavior:'smooth'});};
 function view(){ $('clockObject').style.transform=`perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg) rotateZ(${rz}deg) scale(${zoom})`;const front=rx===0&&ry===0;$('frontView').classList.toggle('selected',front);$('angleView').classList.toggle('selected',!front);}
-$('frontView').onclick=()=>{rx=ry=rz=0;view();};$('angleView').onclick=()=>{rx=12;ry=-19;rz=-7;view();};
-$('restoreView').onclick=()=>{zoom=1;rx=12;ry=-19;rz=-7;view();};
-$('zoomIn').onclick=()=>{zoom=Math.min(1.4,zoom+.1);view();};$('zoomOut').onclick=()=>{zoom=Math.max(.6,zoom-.1);view();};
-let drag=null;$('clockStage').onpointerdown=e=>{drag=[e.clientX,e.clientY,rx,ry];$('clockStage').setPointerCapture(e.pointerId);};
+$('frontView').onclick=()=>{if(previewMode==='print'){meshView?.setView('front');return;}rx=ry=rz=0;view();};$('angleView').onclick=()=>{if(previewMode==='print'){meshView?.setView('angle');return;}rx=12;ry=-19;rz=-7;view();};
+$('restoreView').onclick=()=>{if(previewMode==='print'){meshView?.setView('angle');return;}zoom=1;rx=12;ry=-19;rz=-7;view();};
+$('zoomIn').onclick=()=>{if(previewMode==='print'){meshView?.zoom(1/1.12);return;}zoom=Math.min(1.4,zoom+.1);view();};$('zoomOut').onclick=()=>{if(previewMode==='print'){meshView?.zoom(1.12);return;}zoom=Math.max(.6,zoom-.1);view();};
+let drag=null;$('clockStage').onpointerdown=e=>{if(previewMode==='print')return;drag=[e.clientX,e.clientY,rx,ry];$('clockStage').setPointerCapture(e.pointerId);};
 let viewFrame=null;
 function scheduleView(){if(viewFrame===null)viewFrame=requestAnimationFrame(()=>{viewFrame=null;view();});}
 $('clockStage').onpointermove=e=>{if(!drag)return;ry=Math.max(-60,Math.min(60,drag[3]+(e.clientX-drag[0])*.3));rx=Math.max(-50,Math.min(50,drag[2]-(e.clientY-drag[1])*.3));scheduleView();};
 $('clockStage').onpointerup=$('clockStage').onpointercancel=()=>drag=null;
-$('clockStage').addEventListener('wheel',e=>{e.preventDefault();zoom=Math.min(1.4,Math.max(.6,zoom-e.deltaY*.001));scheduleView();},{passive:false});
+$('clockStage').addEventListener('wheel',e=>{if(previewMode==='print')return;e.preventDefault();zoom=Math.min(1.4,Math.max(.6,zoom-e.deltaY*.001));scheduleView();},{passive:false});
 $('reset').onclick=()=>{
+  setPreviewMode('design');
+  applyingHistory=false;
   importSequence++;restorePending=false;restoreReference=null;importPending=false;activeArtwork=null;
   artworkOrientation=normalizeOrientation(null);$('uploadPanel').setAttribute('aria-busy','false');
   $('export').disabled=!!exportController;exportController?.abort();state={...initial};customSVG=customArtwork=customImage=null;lastDownloadKey=null;
-  for(const id of ['thickness','hole'])delete $(id).dataset.editing;
+  for(const id of ['thickness','hole','diameterNumber'])delete $(id).dataset.editing;
   $('svgUpload').value='';$('uploadStatus').textContent='';tab(false);$('restoreView').click();render({forceInputs:true});validateDimensions();toast('A fresh start. Your saved SVGs are still available.');
 };
 $('help').onclick=()=>$('helpDialog').showModal();$('closeHelp').onclick=$('gotIt').onclick=()=>$('helpDialog').close();
 function cancelRestoration(){
   if(!restorePending&&!restoreReference&&!importPending)return;
   const wasLoading=importPending||restorePending;
-  importSequence++;restorePending=false;restoreReference=null;importPending=false;
+  importSequence++;restorePending=false;restoreReference=null;importPending=false;applyingHistory=false;
   $('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;
   if(wasLoading)$('uploadStatus').textContent='SVG loading cancelled.';
   updateSaveLabel();
@@ -182,7 +242,7 @@ function updateArtworkUI(){
   for(const button of $('savedArtworks').querySelectorAll('button')){
     button.disabled=deletingArtwork;button.classList.toggle('selected',button.dataset.artworkId===activeArtwork?.id);
   }
-  updateSaveLabel();
+  updateSaveLabel();updateHistoryUI();
 }
 async function refreshGallery(){
   const sequence=++gallerySequence;
@@ -205,7 +265,7 @@ function thumbnailFor(image){
   return canvas.toDataURL('image/png');
 }
 function activateArtwork(prepared,record,{useCustom=true,orientation=null}={}){
-  customSVG=prepared.markup;customArtwork=prepared.artworkMarkup;customImage=prepared.image;customRevision++;
+  customSVG=prepared.markup;customArtwork=prepared.artworkMarkup;customImage=prepared.image;customRevision=++revisionCounter;
   activeArtwork={...record};artworkOrientation=normalizeOrientation(orientation);
   if(useCustom)state.design='custom';
   render();
@@ -238,7 +298,7 @@ async function importArtwork(file){
     if(sequence!==importSequence)return;
     $('uploadStatus').textContent=`Couldn’t import ${file.name}: ${error.message}`;toast(error.message);
   }finally{
-    if(sequence===importSequence){importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;updateArtworkUI();persist();}
+    if(sequence===importSequence){importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;updateArtworkUI();persist();checkpointHistory();updateHistoryUI();scheduleMeshPreview();}
   }
 }
 async function loadSavedArtwork(id,{restoring=false,useCustom=true,orientation=null}={}){
@@ -259,7 +319,7 @@ async function loadSavedArtwork(id,{restoring=false,useCustom=true,orientation=n
     if(restoring&&recordRead)restoreReference=null;
     $('uploadStatus').textContent=error.message;toast(error.message);
   }finally{
-    if(sequence===importSequence){restorePending=false;importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;updateArtworkUI();persist();}
+    if(sequence===importSequence){restorePending=false;importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;updateArtworkUI();persist();if(restoring)history.reset(captureSnapshot(),snapshotKey());else checkpointHistory();updateHistoryUI();scheduleMeshPreview();}
   }
 }
 $('svgUpload').onchange=async event=>{const file=event.target.files[0];event.target.value='';await importArtwork(file);};
@@ -280,7 +340,7 @@ $('removeArtwork').onclick=async()=>{
   const removed=activeArtwork;deletingArtwork=true;updateArtworkUI();
   try{
     if(removed.id)await deleteSavedSVG(removed.id);
-    activeArtwork=null;customSVG=customArtwork=customImage=null;customRevision++;restoreReference=null;artworkOrientation=normalizeOrientation(null);
+    activeArtwork=null;customSVG=customArtwork=customImage=null;customRevision=++revisionCounter;restoreReference=null;artworkOrientation=normalizeOrientation(null);
     if(state.design==='custom')state.design='petal';
     $('uploadStatus').textContent=`Removed ${removed.name} from saved artwork.`;render();await refreshGallery();
   }catch(error){toast(error.message);}
@@ -288,7 +348,7 @@ $('removeArtwork').onclick=async()=>{
 };
 // Keep the editor responsive while the mesh is built. If a host blocks workers,
 // retain a local fallback; the original outline is kept for that case.
-function meshAsync(alpha,n,settings,signal,cachedSTL=null,artwork=null){
+function meshAsync(alpha,n,settings,signal,cachedSTL=null,artwork=null,onStage=()=>{},cachedStats=null){
   return new Promise((resolve,reject)=>{
     let worker=null,timer=null,settled=false,fallingBack=false;
     const clean=()=>{clearTimeout(timer);worker?.terminate();signal.removeEventListener('abort',abort);};
@@ -296,7 +356,7 @@ function meshAsync(alpha,n,settings,signal,cachedSTL=null,artwork=null){
     const abort=()=>finish(new DOMException('Export cancelled','AbortError'));
     const fallback=()=>{
       if(settled||fallingBack)return;fallingBack=true;clearTimeout(timer);worker?.terminate();
-      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();const mesh=cachedSTL||makeClockSTL(alpha,n,settings,undefined,artwork);const buffer=settings.exportFormat==='3mf'?stlTo3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,artwork:artwork?.texture}):mesh;finish(null,{buffer,stlBuffer:mesh});}catch(error){finish(error);}},0);
+      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();const mesh=cachedSTL||makeClockSTL(alpha,n,settings,undefined,artwork),stats=cachedStats||analyzeSTL(mesh);const buffer=settings.exportFormat==='3mf'?stlTo3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,artwork:artwork?.texture}):mesh;finish(null,{buffer,stlBuffer:mesh,stats});}catch(error){finish(error);}},0);
     };
     signal.addEventListener('abort',abort,{once:true});
     if(signal.aborted){abort();return;}
@@ -305,8 +365,8 @@ function meshAsync(alpha,n,settings,signal,cachedSTL=null,artwork=null){
       worker.onmessage=({data})=>{
         if(data.id!==1||settled)return;
         if(data.error){finish(new Error(data.error));return;}
-        if(data.stage)$('exportStatus').textContent=data.stage==='outline'?'Smoothing your outline…':data.stage==='details'?'Adding your surface details…':data.stage==='package'?'Preparing your 3MF file…':'Finishing your print file…';
-        if(data.buffer)finish(null,{buffer:data.buffer,stlBuffer:data.stlBuffer||data.buffer});
+        if(data.stage)onStage(data.stage);
+        if(data.buffer)finish(null,{buffer:data.buffer,stlBuffer:data.stlBuffer||data.buffer,stats:data.stats});
       };
       worker.onerror=event=>{event.preventDefault();fallback();};
       const copy=(cachedSTL||alpha.buffer).slice(0);
@@ -314,7 +374,7 @@ function meshAsync(alpha,n,settings,signal,cachedSTL=null,artwork=null){
       const transfers=[copy];
       if(transferredArtwork?.rgba)transfers.push(transferredArtwork.rgba.buffer);
       if(transferredArtwork?.texture)transfers.push(transferredArtwork.texture.png.buffer);
-      worker.postMessage({id:1,...(cachedSTL?{stlBuffer:copy}:{alpha:copy}),n,settings,artwork:transferredArtwork},transfers);
+      worker.postMessage({id:1,...(cachedSTL?{stlBuffer:copy}:{alpha:copy}),n,settings,artwork:transferredArtwork,stats:cachedStats},transfers);
       timer=setTimeout(fallback,60000);
     }catch{fallback();}
   });
@@ -339,10 +399,140 @@ function paintHourDetails(context,settings){
   }
   context.restore();
 }
+function designSnapshot(){const settings={...state,faceColor:colors[state.color][1]};return {settings,geometry:geometryKey(settings),image:customImage,placement:[...artworkOrientation]};}
+async function ensureMesh(snapshot,signal,onStage=()=>{}){
+  const {settings,geometry,image,placement}=snapshot;
+  const result=await meshStore.get(geometry,async(jobSignal,stage)=>{
+    jobSignal.throwIfAborted();stage('outline');
+    const n=Math.ceil(settings.diameter/.15),canvas=document.createElement('canvas');canvas.width=canvas.height=n;
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.scale(n/400,n/400);
+    if(settings.design==='custom')drawPlacedArtwork(ctx,image,placement);else{ctx.fillStyle='#fff';ctx.fill(new Path2D(outlines.get(settings.design)));}
+    const pixels=ctx.getImageData(0,0,n,n).data,alpha=new Uint8Array(n*n);
+    for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
+    let artwork=null;
+    if(originalArtwork(settings)){
+      paintHourDetails(ctx,settings);
+      const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));jobSignal.throwIfAborted();
+      if(!png)throw Error('The SVG color artwork could not be prepared.');
+      artwork={rgba:pixels,texture:{png:new Uint8Array(await png.arrayBuffer()),frame:artworkFrame(alpha,n,settings.diameter),thickness:settings.thickness}};
+    }
+    jobSignal.throwIfAborted();
+    const mesh=await meshAsync(alpha,n,{...settings,exportFormat:'stl'},jobSignal,null,artwork,stage);
+    return {stlBuffer:mesh.stlBuffer,stats:mesh.stats,artwork:artwork?{texture:artwork.texture}:null};
+  },{signal,onStage});
+  updatePrintSummary();return result;
+}
+const stageMessage=stage=>({outline:'Tracing the clock outline…',details:'Adding the printable details…',mesh:'Closing the print mesh…',package:'Preparing your 3MF file…'}[stage]||'Checking your model…');
+function updatePrintSummary(){
+  const key=geometryKey(),result=meshStore.peek(key),stats=result?.stats;
+  if(checkController&&key!==checkKey)checkController.abort();
+  $('modelDimensions').textContent=stats?stats.dimensions.map(value=>Number(value.toFixed(1))).join(' × '):`${state.diameter} mm span`;
+  $('modelVolume').textContent=stats?(stats.volume/1000).toFixed(1):'—';$('modelParts').textContent=stats?String(stats.components):'—';
+  $('printCheckStatus').textContent=stats?(stats.components>1?`${stats.components} separate pieces. Plan a backing or assembly before printing.`:'Closed print mesh checked. Add the movement and hands after printing.'):'Check the model to see its exact dimensions, relief, and separate parts.';
+  $('printCheckStatus').dataset.tone=stats?(stats.components>1?'warning':'success'):'neutral';
+  $('printCheckStatus').dataset.checked=String(!!stats);
+  const valid=[$('bedWidth'),$('bedDepth')].every(input=>input.value!==''&&input.validity.valid);
+  const fit=stats?bedFit(stats.dimensions,bed.width,bed.depth):null;
+  $('bedLabel').textContent=`${bed.width} × ${bed.depth} mm${valid&&fit?(fit.fits?' · Fits':' · Too small'):''}`;
+  $('bedLabel').dataset.tone=valid&&fit?(fit.fits?'success':'warning'):'neutral';
+  if(stats&&valid&&!fit.fits){$('printCheckStatus').textContent=`${stats.components>1?stats.components+' separate pieces.':'Closed mesh checked.'} Too large for your ${bed.width} × ${bed.depth} mm build plate.`;$('printCheckStatus').dataset.tone='warning';}
+  $('bedStatus').textContent=!valid?'Enter build plate dimensions from 80 to 500 mm.':!fit?'Check the model to verify its fit on this build plate.':fit.fits?(fit.rotated?'Fits after a quarter turn on the build plate.':'Fits on your build plate.'): 'This model is larger than your build plate. Reduce its size or choose a larger printer.';
+  $('bedStatus').dataset.tone=valid&&fit?(fit.fits?'success':'warning'):'neutral';
+  $('fitToBed').hidden=!valid||!fit||fit.fits;
+  if(meshView)meshView.setBed(bed.width,bed.depth,fit?.fits!==false,$('meshBed').checked);
+}
+for(const [id,key]of [['bedWidth','width'],['bedDepth','depth']]){
+  $(id).value=bed[key];
+  $(id).addEventListener('input',()=>{
+    if([$('bedWidth'),$('bedDepth')].every(input=>input.value!==''&&input.validity.valid)){
+      bed={width:Number($('bedWidth').value),depth:Number($('bedDepth').value)};
+      try{localStorage.setItem('clock-factory-bed',JSON.stringify(bed));}catch{}
+    }
+    updatePrintSummary();
+  });
+}
+$('fitToBed').onclick=()=>{
+  const stats=meshStore.peek(geometryKey())?.stats;if(!stats)return;
+  const [x,y]=stats.dimensions,scale=Math.max(Math.min((bed.width-4)/x,(bed.depth-4)/y),Math.min((bed.width-4)/y,(bed.depth-4)/x));
+  const diameter=Math.min(300,Math.floor(state.diameter*scale));
+  if(diameter<100){toast('This design needs a larger build plate at the minimum 100 mm size.');return;}
+  state.diameter=diameter;render({forceInputs:true});toast(`Resized to ${diameter} mm, with space around the print.`);
+};
+$('checkModel').onclick=async()=>{
+  if(checkController||importPending||restorePending||deletingArtwork||!validateDimensions(true))return;
+  const controller=new AbortController(),snapshot=designSnapshot();checkController=controller;checkKey=snapshot.geometry;
+  $('checkModel').disabled=true;$('checkModel').textContent='Checking…';
+  try{await ensureMesh(snapshot,controller.signal,stage=>{if(snapshot.geometry===geometryKey())$('printCheckStatus').textContent=stageMessage(stage);});}
+  catch(error){if(error.name!=='AbortError')toast('Could not check model: '+error.message);}
+  finally{if(checkController===controller){checkController=null;$('checkModel').disabled=false;$('checkModel').textContent='Check model';updatePrintSummary();}}
+};
+function setPreviewMode(mode){
+  previewMode=mode;
+  for(const [id,active]of [['designPreview',mode==='design'],['printPreview',mode==='print']]){$(id).classList.toggle('selected',active);$(id).setAttribute('aria-selected',String(active));$(id).tabIndex=active?0:-1;}
+  $('preview').dataset.mode=mode;$('clockObject').hidden=$('clockShadow').hidden=$('measureLine').hidden=mode==='print';
+  $('showHandsRow').hidden=mode==='print';$('meshOptions').hidden=mode!=='print';$('previewBadge').textContent=mode==='print'?'Actual print model':'Design preview';
+  if(mode==='design'){clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=null;$('meshCanvas').hidden=$('meshState').hidden=true;meshView?.setVisible(false);}
+  else scheduleMeshPreview(true);
+}
+function scheduleMeshPreview(immediate=false){
+  if(previewMode!=='print')return;
+  const snapshot=designSnapshot(),key=snapshot.geometry;
+  if(importPending||restorePending||deletingArtwork){
+    clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=null;$('meshCanvas').hidden=true;$('meshState').hidden=false;$('meshStateText').textContent='Opening your artwork…';return;
+  }
+  if(key===loadedMeshKey&&meshView){clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=key;meshView.setAppearance(snapshot.settings.faceColor,$('meshColors').checked,$('meshWireframe').checked);$('meshState').hidden=true;$('meshCanvas').hidden=false;meshView.setVisible(true);return;}
+  if(key===meshPreviewKey&&(meshPreviewController||meshPreviewTimer))return;
+  clearTimeout(meshPreviewTimer);meshPreviewController?.abort();meshPreviewKey=key;
+  meshView?.setVisible(false);
+  $('meshCanvas').hidden=true;$('meshState').hidden=false;$('meshRetry').hidden=true;$('meshStateText').textContent='Preparing your printable model…';$('meshState').dataset.loading='true';
+  meshPreviewTimer=setTimeout(async()=>{
+    meshPreviewTimer=null;const controller=new AbortController();meshPreviewController=controller;
+    try{
+      const result=await ensureMesh(snapshot,controller.signal,stage=>{if(!controller.signal.aborted)$('meshStateText').textContent=stageMessage(stage);});
+      controller.signal.throwIfAborted();
+      if(previewMode!=='print'||key!==geometryKey())return;
+      if(!meshView){const {PrintView}=await import(meshViewURL.href);controller.signal.throwIfAborted();meshView=new PrintView($('meshCanvas'),{onError:error=>{meshView?.dispose();meshView=null;loadedMeshKey=null;$('meshCanvas').hidden=true;$('meshState').hidden=false;$('meshStateText').textContent=error.message;$('meshRetry').hidden=false;}});}
+      await meshView.setModel(result,snapshot.settings,{signal:controller.signal});controller.signal.throwIfAborted();
+      if(previewMode!=='print'||key!==geometryKey())return;
+      loadedMeshKey=key;$('meshCanvas').dataset.geometryKey=key;$('meshCanvas').dataset.triangles=String(result.stats.triangles);
+      $('meshCanvas').hidden=false;$('meshState').hidden=true;meshView.setAppearance(colors[state.color][1],$('meshColors').checked,$('meshWireframe').checked);meshView.setVisible(true);updatePrintSummary();
+    }catch(error){if(error.name!=='AbortError'&&previewMode==='print'&&key===geometryKey()){$('meshState').hidden=false;$('meshState').dataset.loading='false';$('meshStateText').textContent=meshStore.peek(key)?'The print model is checked, but 3D graphics are unavailable on this device. You can still download your model.':`Could not prepare this model: ${error.message}`;$('meshRetry').hidden=false;meshPreviewKey=null;}}
+    finally{if(meshPreviewController===controller)meshPreviewController=null;}
+  },immediate?0:400);
+}
+$('designPreview').onclick=()=>setPreviewMode('design');$('printPreview').onclick=()=>setPreviewMode('print');
+$('meshRetry').onclick=()=>{loadedMeshKey=meshPreviewKey=null;scheduleMeshPreview(true);};
+for(const id of ['meshColors','meshWireframe'])$(id).onchange=()=>meshView?.setAppearance(colors[state.color][1],$('meshColors').checked,$('meshWireframe').checked);
+$('meshBed').onchange=updatePrintSummary;
+$('openProject').onclick=()=>$('projectUpload').click();
+$('saveProject').onclick=()=>{
+  if(importPending||restorePending||deletingArtwork)return;
+  try{const text=serializeProject(state,activeArtwork,artworkOrientation),url=URL.createObjectURL(new Blob([text],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=projectFilename(state.projectName);document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);toast('Project saved with your settings and original SVG. Open the .clock file to continue on another device.');}
+  catch(error){toast('Could not save project: '+error.message);}
+};
+$('projectUpload').onchange=async event=>{
+  const file=event.target.files[0];event.target.value='';if(!file||deletingArtwork)return;
+  cancelRestoration();const sequence=++importSequence;importPending=true;updateArtworkUI();
+  try{
+    if(file.size>MAX_PROJECT_BYTES)throw Error('Choose a project smaller than 12 MB.');
+    const project=parseProject(await file.text()),prepared=project.artwork?await prepareSVG(project.artwork.source):null;
+    if(sequence!==importSequence)return;
+    state={...project.settings};artworkOrientation=project.orientation;
+    if(prepared){customSVG=prepared.markup;customArtwork=prepared.artworkMarkup;customImage=prepared.image;activeArtwork={...project.artwork,id:null,size:new TextEncoder().encode(project.artwork.source).byteLength,thumbnail:thumbnailFor(prepared.image)};}
+    else{customSVG=customArtwork=customImage=null;activeArtwork=null;}
+    customRevision=++revisionCounter;render({forceInputs:true});tab(state.design==='custom');
+    if(activeArtwork){try{const saved=await saveSVG(activeArtwork);if(sequence!==importSequence)return;activeArtwork=saved;}catch(error){if(sequence!==importSequence)return;$('uploadStatus').textContent=error.message;}}
+    if(sequence!==importSequence)return;
+    if(activeArtwork)$('uploadStatus').textContent=`Loaded ${activeArtwork.name}. ${activeArtwork.id?'Saved on this device.':'Available for this session.'}`;
+    toast(`Opened ${state.projectName}. Your settings and artwork are restored.`);refreshGallery();
+  }catch(error){if(sequence===importSequence)toast('Could not open project: '+error.message);}
+  finally{if(sequence===importSequence){importPending=false;updateArtworkUI();persist();checkpointHistory();updateHistoryUI();updatePrintSummary();scheduleMeshPreview();}}
+};
+window.addEventListener('pagehide',()=>{meshPreviewController?.abort();checkController?.abort();meshView?.dispose();});
 $('cancelExport').onclick=()=>exportController?.abort();
 $('export').onclick=async()=>{
   if(importPending||deletingArtwork||restorePending||exportController||!validateDimensions(true))return;
-  const settings={...state,faceColor:colors[state.color][1]},geometry=geometryKey(settings),key=fileKey(settings),image=customImage,placement=[...artworkOrientation];
+  const snapshot=designSnapshot(),settings=snapshot.settings,key=fileKey(settings);
   if(exportCache?.key===key){downloadClock(exportCache.blob,settings,key);return;}
   const controller=new AbortController();exportController=controller;
   const button=$('export');button.disabled=true;button.textContent='Preparing your clock…';
@@ -351,33 +541,17 @@ $('export').onclick=async()=>{
   await new Promise(r=>setTimeout(r,0));
   try{
     controller.signal.throwIfAborted();
-    const cachedSTL=meshCache?.key===geometry?meshCache.buffer:null;
-    let alpha=null,n=0,artwork=cachedSTL?meshCache.artwork:null;
-    if(!cachedSTL){
-    n=Math.ceil(settings.diameter/.15);const canvas=document.createElement('canvas');canvas.width=canvas.height=n;const ctx=canvas.getContext('2d',{willReadFrequently:true});
-    ctx.scale(n/400,n/400);
-    if(settings.design==='custom')drawPlacedArtwork(ctx,image,placement);else{ctx.fillStyle='#fff';ctx.fill(new Path2D(outlines.get(settings.design)));}
-    const pixels=ctx.getImageData(0,0,n,n).data;alpha=new Uint8Array(n*n);
-    for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
-    if(originalArtwork(settings)){
-      paintHourDetails(ctx,settings);
-      const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
-      if(!png)throw Error('The SVG color artwork could not be prepared.');
-      artwork={rgba:pixels,texture:{png:new Uint8Array(await png.arrayBuffer()),frame:artworkFrame(alpha,n,settings.diameter),thickness:settings.thickness}};
-    }
-    }
+    const onStage=stage=>{$('exportStatus').textContent=stageMessage(stage);const progress=$('exportProgress').querySelector('progress');progress.max=100;progress.value={outline:15,details:40,mesh:70,package:90}[stage]||5;};
+    const mesh=await ensureMesh(snapshot,controller.signal,onStage);
+    const result=settings.exportFormat==='3mf'?await meshAsync(null,0,settings,controller.signal,mesh.stlBuffer,mesh.artwork,onStage,mesh.stats):{buffer:mesh.stlBuffer};
     controller.signal.throwIfAborted();
-    $('exportStatus').textContent='Creating your print file… You can keep designing.';
-    const result=await meshAsync(alpha,n,settings,controller.signal,cachedSTL,artwork);
-    controller.signal.throwIfAborted();
-    meshCache={key:geometry,buffer:result.stlBuffer,artwork:artwork?{texture:artwork.texture}:null};
     const blob=new Blob([result.buffer],{type:settings.exportFormat==='3mf'?'model/3mf':'model/stl'});exportCache={key,blob};
     downloadClock(blob,settings,key);
   }catch(error){
     if(error.name==='AbortError')toast('Download cancelled. Your design is still here.');
     else toast('Could not export: '+error.message);
   }finally{
-    exportController=null;button.disabled=importPending||deletingArtwork||restorePending;updateExportFormatUI();
+    exportController=null;button.disabled=importPending||deletingArtwork||restorePending;updateExportFormatUI();validateDimensions();
     $('exportProgress').hidden=true;$('printSection').setAttribute('aria-busy','false');
   }
 };

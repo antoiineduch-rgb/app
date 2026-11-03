@@ -1,20 +1,21 @@
 {
   "name": "clock-factory",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.js",
     "dev": "node build.js && node server.js",
     "start": "node build.js && node server.js",
-    "test": "node --test geometry.test.js hour-numerals.test.js hour-mesh.test.js export-3mf.test.js svg-details.test.js svg-placement.test.js contours.test.js mesh-extrusion.test.js mesh-quality.test.js server.test.js desktop/assets.test.cjs",
+    "test": "node --test geometry.test.js hour-numerals.test.js hour-mesh.test.js export-3mf.test.js svg-details.test.js svg-placement.test.js contours.test.js mesh-extrusion.test.js mesh-quality.test.js project.test.js history.test.js mesh-analysis.test.js mesh-store.test.js server.test.js desktop/assets.test.cjs",
     "desktop": "npm run build && electron .",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "dist:win:portable": "npm run build && electron-builder --win portable --x64 --publish never",
     "test:svg": "npm run build && electron tests/svg-import.electron.cjs",
     "test:svg-library": "npm run build && electron tests/svg-library.electron.cjs",
     "test:numerals-3mf": "npm run build && electron tests/numerals-3mf.electron.cjs",
-    "test:svg-details": "npm run build && electron tests/svg-details.electron.cjs"
+    "test:svg-details": "npm run build && electron tests/svg-details.electron.cjs",
+    "test:studio": "npm run build && electron tests/studio.electron.cjs"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -25,7 +26,8 @@
     "electron-builder": "26.18.0",
     "esbuild": "0.28.2",
     "fflate": "0.8.3",
-    "polygon-clipping": "0.15.7"
+    "polygon-clipping": "0.15.7",
+    "three": "0.187.0"
   },
   "description": "Design custom 3D printable clocks from SVGs and ready-made designs.",
   "author": "Clock Factory",
@@ -45,6 +47,7 @@
       "style.css",
       "studio.js",
       "export-worker.js",
+      "mesh-view.js",
       "package.json",
       "THIRD_PARTY_NOTICES.txt"
     ],

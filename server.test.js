@@ -18,6 +18,8 @@ test('serves the editor and assets at root and under a hosting prefix', async ()
       assert.equal(worker.status,200);
       assert.match(worker.headers.get('content-type'),/javascript/);
       assert.match(await worker.text(),/self\.onmessage/);
+      const view=await fetch(base+prefix+'mesh-view.js');
+      assert.equal(view.status,200);assert.match(view.headers.get('content-type'),/javascript/);assert.match(await view.text(),/export\{/);
       assert.equal((await fetch(base+prefix+'style.css')).status,200);
     }
     assert.equal((await fetch(base+'/package.json')).status,404);

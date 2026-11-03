@@ -7,6 +7,7 @@ const ASSETS = new Map([
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
   ['/studio.js', ['studio.js', 'text/javascript; charset=utf-8']],
   ['/export-worker.js', ['export-worker.js', 'text/javascript; charset=utf-8']],
+  ['/mesh-view.js', ['mesh-view.js', 'text/javascript; charset=utf-8']],
   ['/THIRD_PARTY_NOTICES.txt', ['THIRD_PARTY_NOTICES.txt', 'text/plain; charset=utf-8']],
 ]);
 const CSP = [

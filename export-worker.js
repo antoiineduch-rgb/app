@@ -4161,16 +4161,70 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength);
   }
 
+  // mesh-analysis.js
+  function analyzeSTL(buffer) {
+    const view = buffer instanceof ArrayBuffer ? new DataView(buffer) : ArrayBuffer.isView(buffer) ? new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength) : null;
+    if (!view || view.byteLength < 84) throw Error("The print model is incomplete.");
+    const count = view.getUint32(80, true);
+    if (!count || view.byteLength !== 84 + count * 50) throw Error("The print model has an invalid triangle count.");
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity], ids = /* @__PURE__ */ new Map(), parents = [], ranks = [];
+    let volume = 0, surfaceArea = 0;
+    const root = (id) => {
+      while (parents[id] !== id) {
+        parents[id] = parents[parents[id]];
+        id = parents[id];
+      }
+      return id;
+    };
+    const connect = (a, b) => {
+      a = root(a);
+      b = root(b);
+      if (a === b) return;
+      if (ranks[a] < ranks[b]) [a, b] = [b, a];
+      parents[b] = a;
+      if (ranks[a] === ranks[b]) ranks[a]++;
+    };
+    function vertex(point) {
+      const key = point.join(",");
+      let id = ids.get(key);
+      if (id === void 0) {
+        id = parents.length;
+        ids.set(key, id);
+        parents.push(id);
+        ranks.push(0);
+      }
+      return id;
+    }
+    for (let i2 = 0; i2 < count; i2++) {
+      const points = [0, 1, 2].map((j) => [0, 1, 2].map((k) => view.getFloat32(96 + i2 * 50 + j * 12 + k * 4, true)));
+      for (const p of points) for (let k = 0; k < 3; k++) {
+        if (!Number.isFinite(p[k])) throw Error("The print model contains invalid coordinates.");
+        min[k] = Math.min(min[k], p[k]);
+        max[k] = Math.max(max[k], p[k]);
+      }
+      const [a, b, c] = points, u = b.map((v2, k) => v2 - a[k]), v = c.map((v2, k) => v2 - a[k]);
+      surfaceArea += Math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]) / 2;
+      volume += (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+      const [ia, ib, ic] = points.map(vertex);
+      connect(ia, ib);
+      connect(ia, ic);
+    }
+    let components = 0;
+    for (let i2 = 0; i2 < parents.length; i2++) if (root(i2) === i2) components++;
+    return { triangles: count, vertices: parents.length, components, min, max, dimensions: max.map((value, i2) => value - min[i2]), volume: Math.abs(volume), surfaceArea, bytes: view.byteLength };
+  }
+
   // export-worker-source.js
   self.onmessage = ({ data }) => {
     const { id, alpha, n, settings, stlBuffer, artwork } = data;
     try {
       const mesh = stlBuffer || makeClockSTL(new Uint8Array(alpha), n, settings, (stage) => self.postMessage({ id, stage }), artwork);
+      const stats = data.stats || analyzeSTL(mesh);
       if (settings.exportFormat === "3mf") {
         self.postMessage({ id, stage: "package" });
         const buffer = stlTo3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor || "#C47F62", artwork: artwork?.texture });
-        self.postMessage({ id, buffer, stlBuffer: mesh }, [buffer, mesh]);
-      } else self.postMessage({ id, buffer: mesh }, [mesh]);
+        self.postMessage({ id, buffer, stlBuffer: mesh, stats }, [buffer, mesh]);
+      } else self.postMessage({ id, buffer: mesh, stats }, [mesh]);
     } catch (error) {
       self.postMessage({ id, error: error?.message || "Could not prepare the print file." });
     }

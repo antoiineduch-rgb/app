@@ -10,6 +10,12 @@ protocol.registerSchemesAsPrivileged([
 
 const root = join(__dirname, '..');
 let mainWindow;
+function editorAction(id,window=mainWindow){return window?.webContents.executeJavaScript(`document.getElementById(${JSON.stringify(id)})?.click()`,true).catch(()=>{});}
+function editHistory(action,window=mainWindow){
+  if(!window)return;
+  window.webContents.executeJavaScript(`(() => { const active=document.activeElement; if(active?.matches('textarea,[contenteditable="true"],input:not([type="range"]):not([type="checkbox"])'))return false; document.getElementById(${JSON.stringify(action)})?.click(); return true; })()`)
+    .then(handled=>{if(!handled&&!window.isDestroyed())window.webContents[action]();}).catch(()=>{});
+}
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -62,15 +68,15 @@ if (!app.requestSingleInstanceLock()) {
       callback({ cancel: !allowed });
     });
     appSession.on('will-download', (event, item) => {
-      const extension=item.getFilename().match(/\.(stl|3mf)$/i)?.[1].toLowerCase();
+      const extension=item.getFilename().match(/\.(stl|3mf|clock)$/i)?.[1].toLowerCase();
       if (!item.getURL().startsWith('blob:clock://studio/') || !extension) {
         event.preventDefault();
         return;
       }
       item.setSaveDialogOptions({
-        title: 'Save your clock face',
+        title: extension==='clock'?'Save Clock Factory project':'Save your clock face',
         defaultPath: join(app.getPath('downloads'), item.getFilename()),
-        filters: [{ name: extension==='3mf'?'3MF clock model':'STL clock mesh', extensions: [extension] }],
+        filters: [{ name: extension==='clock'?'Clock Factory project':extension==='3mf'?'3MF clock model':'STL clock mesh', extensions: [extension] }],
       });
     });
     app.setAboutPanelOptions({
@@ -79,8 +85,8 @@ if (!app.requestSingleInstanceLock()) {
       copyright: 'Clock Factory · Design it. Print it. Make time your own.',
     });
     Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { label: 'File', submenu: [{ role: 'close' }, { type: 'separator' }, { role: 'quit' }] },
-      { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+      { label: 'File', submenu: [{label:'New design',accelerator:'CmdOrCtrl+N',click:(_item,window)=>editorAction('reset',window)},{label:'Open project…',accelerator:'CmdOrCtrl+O',click:(_item,window)=>editorAction('openProject',window)},{label:'Save project…',accelerator:'CmdOrCtrl+S',click:(_item,window)=>editorAction('saveProject',window)},{type:'separator'},{ role: 'close' }, { role: 'quit' }] },
+      { label: 'Edit', submenu: [{label:'Undo design change',accelerator:'CmdOrCtrl+Z',click:(_item,window)=>editHistory('undo',window)},{label:'Redo design change',accelerator:'CmdOrCtrl+Shift+Z',click:(_item,window)=>editHistory('redo',window)},{label:'Redo',accelerator:'Ctrl+Y',visible:false,click:(_item,window)=>editHistory('redo',window)},{ type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
       { label: 'View', submenu: [{ role: 'reload' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
       { label: 'Help', submenu: [{ label: 'About Clock Factory', click: () => app.showAboutPanel() }] },
     ]));
