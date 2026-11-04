@@ -14,6 +14,8 @@ import { analyzeSTL,bedFit } from './mesh-analysis.js';
 import {FilamentPreview} from './filament-preview.js';
 import {normalizeFilamentOverrides} from './filament-colors.js';
 import {HoleFitDialog} from './hole-fit-ui.js';
+import {autoHourFit,fitHourLayout,hourLayoutMarkup} from './hour-layout.js';
+import {RECESS_SKIN,recessDimensions} from './mechanism-recess.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial=DEFAULT_SETTINGS;
@@ -35,12 +37,12 @@ const outlines=new Map(designs.map(d=>[d.id,shapePath(d.id)]));
 const workerURL=new URL('./export-worker.js',document.currentScript?.src||location.href);
 const meshViewURL=new URL('./mesh-view.js',document.currentScript?.src||location.href);
 const history=new DesignHistory(),meshStore=new MeshStore(2);
-let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null,applyingHistory=false,backingViewCache=null;
+let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null,applyingHistory=false,backingViewCache=null,sourceInfoCache=null,lastGeometryError=null,meshCameraView='angle';
 let previewMode='design',meshView=null,loadedMeshKey=null,meshPreviewKey=null,meshPreviewController=null,meshPreviewTimer=null,checkController=null,checkKey=null;
 let bed={width:220,depth:220},bedPreset='custom';
 try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500)){bed={width:saved.width,depth:saved.depth};if(saved.preset==='a1'&&saved.width===256&&saved.depth===256)bedPreset='a1';}}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
-function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone,settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null]);}
+function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone,settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false]);}
 function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[colors[settings.color][1],settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor,Object.entries(settings.bambuColors).sort()]:null]:null]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
 function updateSaveLabel(){
@@ -62,7 +64,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)flushSave()
 function backingViewTransform(){
   const key=JSON.stringify([customRevision,artworkOrientation,state.diameter,state.svgBackingMargin]);
   if(backingViewCache?.key===key)return backingViewCache.transform;
-  const {frame,width:n}=prepareFilamentRaster(designSnapshot()),scale=frame.scale*n/400*360/state.diameter;
+  const {frame,n}=sourceInfo(designSnapshot()),scale=frame.scale*n/400*360/state.diameter;
   const transform=`matrix(${scale} 0 0 ${scale} ${200-frame.cx*frame.scale*360/state.diameter} ${200-frame.cy*frame.scale*360/state.diameter})`;
   backingViewCache={key,transform};return transform;
 }
@@ -72,12 +74,17 @@ function faceMarkup(){
 }
 function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   const color=colors[state.color][1],detailed=originalArtwork(),backed=usesSVGBacking(state);
-  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,state.hourStyle,state.numberSize,state.numberPosition,state.diameter,state.svgDetail,customRevision,artworkOrientation,backed,backed?[state.svgBackingMargin,state.hole]:null]);
+  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,state.hourStyle,state.numberSize,state.numberPosition,state.diameter,state.svgDetail,customRevision,artworkOrientation,backed,state.hourFit,backed||autoHourFit(state)?[state.svgBackingMargin,state.hole]:null]);
   if(nextPreviewKey!==previewKey){
   let ticks='',numberClearance='';
   if(state.markers&&state.hourStyle!=='ticks'){ticks=`<g id="hourNumerals" fill="#f5e5cd">${hourNumeralMarkup(state)}</g>`;numberClearance=`<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2*400/state.diameter}" stroke-linejoin="round">${hourNumeralMarkup(state)}</g></mask>`;}
   if(state.markers&&state.hourStyle==='ticks')for(let i=0;i<12;i++)ticks+=`<rect x="197.5" y="76" width="5" height="${i%3===0?17:10}" rx="2" transform="rotate(${i*30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
   if(backed)ticks=`<g transform="translate(200 200) scale(0.9) translate(-200 -200)">${ticks}</g>`;
+  if(autoHourFit(state)){
+    const {layout,frame,n}=sourceInfo(designSnapshot()),project=backed?(x,y)=>[200+x*360/state.diameter,200-y*360/state.diameter]:(x,y)=>[(x/frame.scale+frame.cx)*400/n,(frame.cy-y/frame.scale)*400/n];
+    const markup=hourLayoutMarkup(layout,project);ticks=`<g id="hourOverlay" fill="#f5e5cd"><g${state.hourStyle!=='ticks'?' id="hourNumerals"':''}>${markup}</g></g>`;
+    if(state.hourStyle!=='ticks')numberClearance=`<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2*(backed?360/state.diameter:400/(n*frame.scale))}" stroke-linejoin="round">${markup}</g></mask>`;
+  }
   $('clockSvg').innerHTML=`<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance?' mask="url(#numberClearanceMask)"':''}>${state.texture==='ripple'?Array.from({length:44},(_,i)=>`<circle cx="200" cy="200" r="${12+i*4}" fill="none" stroke="${i%2?'#fff0da':'#774832'}" stroke-opacity="${i%2?'.18':'.23'}" stroke-width=".8"/>`).join(''):state.texture==='grain'?'<rect width="400" height="400" fill="url(#ridges)"/>':''}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g id="previewHands" style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
   if(detailed){
     const painted=document.createElementNS('http://www.w3.org/2000/svg','g');
@@ -87,9 +94,10 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   }
   if(backed){
     const svg=$('clockSvg'),ns='http://www.w3.org/2000/svg',circle=document.createElementNS(ns,'circle'),mask=document.createElementNS(ns,'mask'),group=document.createElementNS(ns,'g');
+    if(autoHourFit(state)&&$('hourOverlay'))svg.insertBefore($('hourOverlay'),$('previewHands'));
     circle.id='svgBackingPreview';circle.setAttribute('cx','200');circle.setAttribute('cy','200');circle.setAttribute('r','180');circle.setAttribute('fill',color);svg.insertBefore(circle,svg.querySelector('defs').nextSibling);
     mask.id='backingShaftMask';mask.setAttribute('maskUnits','userSpaceOnUse');mask.setAttribute('x','0');mask.setAttribute('y','0');mask.setAttribute('width','400');mask.setAttribute('height','400');mask.innerHTML=`<rect width="400" height="400" fill="white"/><circle cx="200" cy="200" r="${state.hole/state.diameter*180}" fill="black"/>`;svg.querySelector('defs').append(mask);
-    svg.querySelector('#numberClearanceMask g')?.setAttribute('transform','translate(200 200) scale(0.9) translate(-200 -200)');
+    if(!autoHourFit(state))svg.querySelector('#numberClearanceMask g')?.setAttribute('transform','translate(200 200) scale(0.9) translate(-200 -200)');
     group.setAttribute('mask','url(#backingShaftMask)');for(const child of [...svg.children])if(child.tagName.toLowerCase()!=='defs'&&child.id!=='previewHands')group.append(child);svg.insertBefore(group,$('previewHands'));
   }
   previewKey=nextPreviewKey;
@@ -112,6 +120,10 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   document.querySelectorAll('[data-size]').forEach(b=>{const active=Number(b.dataset.size)===state.diameter;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',active);});
   $('downloadGuide').hidden=lastDownloadKey!==fileKey();
   $('hourStyle').value=state.hourStyle;$('hourStyle').disabled=!state.markers;
+  $('hourFit').checked=state.hourFit;$('hourFitControls').hidden=state.design!=='custom'||!state.markers;
+  const fitted=autoHourFit(state)?sourceInfo(designSnapshot()).layout:null;
+  $('hourFitStatus').textContent=fitted?`${fitted.labels.length}/12 hours fit${fitted.scale<.999?' · '+Math.round(fitted.scale*100)+'% of requested size':''}.${fitted.missing.length?' A round backing can support the remaining hours.':''}`:'Manual circle placement. Numbers may be clipped at the SVG edge.';
+  $('hourFitStatus').dataset.tone=fitted?.missing.length?'warning':'success';$('backingForHours').hidden=!fitted?.missing.length;
   $('numeralOptions').hidden=!state.markers||state.hourStyle==='ticks';
   for(const id of ['numberSize','numberPosition']){$(id).value=state[id];$(id+'Value').textContent=state[id];}
   $('svgDetailControls').hidden=state.design!=='custom';$('svgDetail').value=state.svgDetail;
@@ -127,6 +139,10 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   if(forceInputs||(document.activeElement!==$('diameterNumber')&&!$('diameterNumber').dataset.editing))$('diameterNumber').value=state.diameter;
   if(forceInputs||document.activeElement!==$('projectName'))$('projectName').value=state.projectName;
   $('showHands').checked=state.showHands;const hands=$('clockSvg').querySelector('#previewHands');if(hands)hands.toggleAttribute('hidden',!state.showHands);
+  $('mechanismRecess').checked=state.mechanismRecess;$('recessOptions').hidden=!state.mechanismRecess;
+  for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance'])if(forceInputs||(document.activeElement!==$(id)&&!$(id).dataset.editing)){$(id).value=state[id];if(forceInputs)delete $(id).dataset.editing;}
+  const pocket=recessDimensions(state);$('recessSummary').textContent=`Pocket: ${pocket.width} × ${pocket.height} mm · ${pocket.depth} mm deep. Keeps at least ${RECESS_SKIN} mm of front material. Verify your movement dimensions before printing.`;
+  $('supportBadge').textContent=state.mechanismRecess?'Rear pocket · check supports':'No supports needed';$('printabilitySummary').textContent=state.mechanismRecess?'Rear pocket · review orientation and supports':'✓ Flat back · no supports needed';
   updateArtworkUI();validateDimensions();persist();
   if(recordHistory)checkpointHistory(historyGroup);updateHistoryUI();updatePrintSummary();scheduleMeshPreview();
 }
@@ -175,12 +191,13 @@ designs.forEach(d=>{const b=document.createElement('button');b.className='design
 colors.forEach(([name,color],i)=>{const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=name;b.setAttribute('aria-label',name);b.onclick=()=>{state.color=i;render();};$('swatches').append(b);});
 document.querySelectorAll('[data-texture]').forEach(b=>b.onclick=()=>{state.texture=b.dataset.texture;render();});
 function validateDimensions(focus=false){
-  const ids=['diameterNumber','thickness','hole'],invalid=ids.map($).find(input=>input.value===''||!input.validity.valid);
+  const ids=['diameterNumber','thickness','hole',...(state.mechanismRecess?['recessWidth','recessHeight','recessDepth','recessClearance']:[])],invalid=ids.map($).find(input=>input.value===''||!input.validity.valid);
   for(const id of ids)$(id).setAttribute('aria-invalid',String($(id).value===''||!$(id).validity.valid));
-  $('dimensionError').hidden=!invalid||invalid.id==='diameterNumber';$('sizeError').hidden=!invalid||invalid.id!=='diameterNumber';
+  $('dimensionError').hidden=!invalid||invalid.id==='diameterNumber'||invalid.id.startsWith('recess');$('sizeError').hidden=!invalid||invalid.id!=='diameterNumber';
   if(invalid){
     const size=invalid.id==='diameterNumber';
-    $(size?'sizeError':'dimensionError').textContent=size?'Enter a diameter from 100 to 300 mm, in steps of 1 mm.':invalid.id==='hole'?'Enter a center hole from 5 to 15 mm, in steps of 0.1 mm.':'Enter a face thickness from 2 to 10 mm, in steps of 0.5 mm.';
+    if(invalid.id.startsWith('recess')){$('recessError').hidden=false;$('recessError').textContent='Rear pocket: enter dimensions within the displayed ranges and steps.';}
+    else $(size?'sizeError':'dimensionError').textContent=size?'Enter a diameter from 100 to 300 mm, in steps of 1 mm.':invalid.id==='hole'?'Enter a center hole from 5 to 15 mm, in steps of 0.1 mm.':'Enter a face thickness from 2 to 10 mm, in steps of 0.5 mm.';
     if(focus){if(!size)document.querySelector('.advanced-settings').open=true;invalid.focus();}
   }
   $('export').disabled=!!invalid||importPending||deletingArtwork||restorePending||!!exportController;
@@ -192,16 +209,31 @@ $('diameterNumber').addEventListener('input',()=>{
   state.diameter=Number($('diameterNumber').value);render({historyGroup:'diameter'});
 });
 $('diameterNumber').addEventListener('blur',()=>{if(validateDimensions())delete $('diameterNumber').dataset.editing;});
-['diameter','thickness','hole','markers','svgBacking'].forEach(id=>$(id).addEventListener('input',()=>{
+function makeRecessRoom(){
+  if(!state.mechanismRecess)return;
+  const required=state.recessDepth+RECESS_SKIN;
+  if(usesSVGBacking(state))state.svgBackingThickness=Math.max(state.svgBackingThickness,Math.ceil((required-1e-7)*5)/5);
+  else{state.thickness=Math.max(state.thickness,Math.ceil((required-1e-7)*2)/2);delete $('thickness').dataset.editing;$('thickness').value=state.thickness;}
+}
+function enableSupportingBacking(){state.svgBacking=true;makeRecessRoom();render({forceInputs:true});}
+$('backingForHours').onclick=enableSupportingBacking;$('backingForRecess').onclick=enableSupportingBacking;
+['diameter','thickness','hole','markers','svgBacking','hourFit','mechanismRecess'].forEach(id=>$(id).addEventListener('input',()=>{
   const input=$(id);
-  if(id==='markers'||id==='svgBacking')state[id]=input.checked;
+  if(['markers','svgBacking','hourFit','mechanismRecess'].includes(id)){state[id]=input.checked;if((id==='mechanismRecess'||id==='svgBacking')&&input.checked)makeRecessRoom();}
   else{
     if(id!=='diameter')input.dataset.editing='true';
     if(!input.validity.valid||input.value===''){validateDimensions();return;}
     state[id]=Number(input.value);
   }
-  validateDimensions();render({historyGroup:['markers','svgBacking'].includes(id)?null:id});
+  validateDimensions();render({historyGroup:['markers','svgBacking','hourFit','mechanismRecess'].includes(id)?null:id});
 }));
+for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance'])$(id).addEventListener('input',()=>{
+  $(id).dataset.editing='true';
+  $(id).setAttribute('aria-invalid',String($(id).value===''||!$(id).validity.valid));
+  if($(id).value===''||!$(id).validity.valid){validateDimensions();return;}
+  state[id]=Number($(id).value);if(id==='recessDepth')makeRecessRoom();render({historyGroup:id});
+});
+for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance'])$(id).addEventListener('blur',()=>{if($(id).value!==''&&$(id).validity.valid){delete $(id).dataset.editing;$(id).value=state[id];}});
 for(const id of ['hourStyle','exportFormat','svgDetail','svgTone','threeMFTarget','filamentCount','bambuBackColor'])$(id).addEventListener('change',()=>{
   const value=id==='filamentCount'?Number($(id).value):$(id).value,allowed={hourStyle:['ticks','arabic','roman'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light'],threeMFTarget:['bambu-a1','standard'],filamentCount:[2,4],bambuBackColor:['background','face']}[id];
   if(!allowed.includes(value))return;state[id]=value;render();
@@ -245,8 +277,10 @@ $('uploadTab').onclick=()=>tab(true);$('presetsTab').onclick=()=>tab(false);
 $('designNav').onclick=()=>{tab(false);$('designGrid').scrollIntoView({behavior:'smooth',block:'center'});toast('Six shapes. Endless possibilities. Pick your starting point.');};
 $('editorLink').onclick=e=>{e.preventDefault();window.scrollTo({top:0,behavior:'smooth'});};
 function view(){ $('clockObject').style.transform=`perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg) rotateZ(${rz}deg) scale(${zoom})`;const front=rx===0&&ry===0;$('frontView').classList.toggle('selected',front);$('angleView').classList.toggle('selected',!front);}
-$('frontView').onclick=()=>{if(previewMode==='print'){meshView?.setView('front');return;}rx=ry=rz=0;view();};$('angleView').onclick=()=>{if(previewMode==='print'){meshView?.setView('angle');return;}rx=12;ry=-19;rz=-7;view();};
-$('restoreView').onclick=()=>{if(previewMode==='print'){meshView?.setView('angle');return;}zoom=1;rx=12;ry=-19;rz=-7;view();};
+function meshCamera(mode){meshCameraView=mode;meshView?.setView(mode);$('meshBed').disabled=mode==='back';for(const [id,view]of [['frontView','front'],['angleView','angle'],['backView','back']])$(id).classList.toggle('selected',mode===view);}
+$('frontView').onclick=()=>{if(previewMode==='print'){meshCamera('front');return;}rx=ry=rz=0;view();};$('angleView').onclick=()=>{if(previewMode==='print'){meshCamera('angle');return;}rx=12;ry=-19;rz=-7;view();};
+$('backView').onclick=()=>meshCamera('back');
+$('restoreView').onclick=()=>{if(previewMode==='print'){meshCamera('angle');return;}zoom=1;rx=12;ry=-19;rz=-7;view();};
 $('zoomIn').onclick=()=>{if(previewMode==='print'){meshView?.zoom(1/1.12);return;}zoom=Math.min(1.4,zoom+.1);view();};$('zoomOut').onclick=()=>{if(previewMode==='print'){meshView?.zoom(1.12);return;}zoom=Math.max(.6,zoom-.1);view();};
 let drag=null;$('clockStage').onpointerdown=e=>{if(previewMode==='print')return;drag=[e.clientX,e.clientY,rx,ry];$('clockStage').setPointerCapture(e.pointerId);};
 let viewFrame=null;
@@ -439,68 +473,80 @@ function downloadClock(blob,settings,key){
   const steps=bambu?[
     'Open the .3mf in Bambu Studio and choose “Open as project” to load its colors.',
     'Choose your actual filament presets and match each numbered color to an AMS spool.',
-    'Check the flat side is on the plate, review flushing volumes, then slice and print.'
+    settings.mechanismRecess?'Inspect the rear pocket, print orientation and supports; review flushing volumes, then slice and print.':'Check the flat side is on the plate, review flushing volumes, then slice and print.'
   ]:[
     `Open the .${settings.exportFormat} file in your printer’s slicer.`,
-    'Place the flat side on the print bed and check the dimensions.',
+    settings.mechanismRecess?'Review the rear pocket, print orientation and support settings in your slicer.':'Place the flat side on the print bed and check the dimensions.',
     'Slice and print, then fit your clock movement and hands.'
   ];
   $('downloadSteps').replaceChildren(...steps.map(text=>{const item=document.createElement('li');item.textContent=text;return item;}));
   $('downloadNote').textContent=bambu?'A1 · 0.4 mm nozzle. Up to 4 colors with one AMS Lite. Reopen your .clock project in Clock Factory to edit the design.':settings.exportFormat==='stl'?'STL contains the shape and raised details. For colored SVG artwork on your A1, choose Bambu A1 · colors above.':'Standard 3MF contains a color texture. For AMS filament assignments, choose Bambu A1 · colors above.';
   toast(fileKey()===key?'Your print file is ready. Next steps are below the download button.':`Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
 }
-function paintHourDetails(context,settings,frame=null){
+function paintHourDetails(context,settings,frame=null,layout=null){
   if(!settings.markers)return;
   context.save();context.fillStyle='#f5e5cd';
-  if(frame&&usesSVGBacking(settings)){const scale=settings.diameter/(frame.n*frame.scale);context.transform(scale,0,0,scale,frame.cx*400/frame.n-200*scale,frame.cy*400/frame.n-200*scale);}
-  if(settings.hourStyle!=='ticks'){
-    const svg=new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${hourNumeralMarkup(settings)}</svg>`,'image/svg+xml');
-    for(const path of svg.querySelectorAll('path'))context.fill(new Path2D(path.getAttribute('d')),'evenodd');
+  if(layout){
+    const scale=400/(frame.n*frame.scale);context.transform(scale,0,0,-scale,frame.cx*400/frame.n,frame.cy*400/frame.n);
+    for(const label of layout.labels){const path=label.polygons.map(p=>p.map(r=>r.map(([x,y],i)=>`${i?'L':'M'}${x} ${y}`).join('')+'Z').join('')).join('');context.fill(new Path2D(path),'evenodd');}
   }else{
-    for(let i=0;i<12;i++){
-      context.save();context.translate(200,200);context.rotate(i*Math.PI/6);context.beginPath();context.roundRect(-2.5,-124,5,i%3===0?17:10,2);context.fill();context.restore();
-    }
+    if(frame&&usesSVGBacking(settings)){const scale=settings.diameter/(frame.n*frame.scale);context.transform(scale,0,0,scale,frame.cx*400/frame.n-200*scale,frame.cy*400/frame.n-200*scale);}
+    if(settings.hourStyle!=='ticks'){
+      const svg=new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${hourNumeralMarkup(settings)}</svg>`,'image/svg+xml');for(const path of svg.querySelectorAll('path'))context.fill(new Path2D(path.getAttribute('d')),'evenodd');
+    }else for(let i=0;i<12;i++){context.save();context.translate(200,200);context.rotate(i*Math.PI/6);context.beginPath();context.roundRect(-2.5,-124,5,i%3===0?17:10,2);context.fill();context.restore();}
   }
   context.restore();
 }
-function designSnapshot(){const settings={...state,faceColor:colors[state.color][1]};return {settings,geometry:geometryKey(settings),image:customImage,placement:[...artworkOrientation]};}
-async function ensureMesh(snapshot,signal,onStage=()=>{}){
-  const {settings,geometry,image,placement}=snapshot;
-  const result=await meshStore.get(geometry,async(jobSignal,stage)=>{
-    jobSignal.throwIfAborted();stage('outline');
-    const n=Math.ceil(settings.diameter/.15),canvas=document.createElement('canvas');canvas.width=canvas.height=n;
-    const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.scale(n/400,n/400);
-    if(settings.design==='custom')drawPlacedArtwork(ctx,image,placement);else{ctx.fillStyle='#fff';ctx.fill(new Path2D(outlines.get(settings.design)));}
-    const pixels=ctx.getImageData(0,0,n,n).data,alpha=new Uint8Array(n*n);
-    for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
-    let artwork=null;
-    if(originalArtwork(settings)){
-      const frame=artworkFrame(alpha,n,settings.diameter,settings);paintHourDetails(ctx,settings,frame);
-      const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));jobSignal.throwIfAborted();
-      if(!png)throw Error('The SVG color artwork could not be prepared.');
-      artwork={rgba:pixels,texture:{png:new Uint8Array(await png.arrayBuffer()),frame,thickness:artworkSurfaceHeight(settings)}};
-    }
-    jobSignal.throwIfAborted();
-    const mesh=await meshAsync(alpha,n,{...settings,exportFormat:'stl'},jobSignal,null,artwork,stage);
-    return {stlBuffer:mesh.stlBuffer,stats:mesh.stats,artwork:artwork?{texture:artwork.texture}:null};
-  },{signal,onStage});
-  updatePrintSummary();return result;
-}
-function prepareFilamentRaster(snapshot,mesh){
+function designSnapshot(){const settings={...state,faceColor:colors[state.color][1]};return {settings,geometry:geometryKey(settings),image:customImage,placement:[...artworkOrientation],revision:customRevision};}
+function sourceRaster(snapshot){
   const {settings,image,placement}=snapshot,n=Math.ceil(settings.diameter/.15),canvas=document.createElement('canvas');canvas.width=canvas.height=n;
   const context=canvas.getContext('2d',{willReadFrequently:true});context.scale(n/400,n/400);
   if(settings.design==='custom')drawPlacedArtwork(context,image,placement);else{context.fillStyle='#fff';context.fill(new Path2D(outlines.get(settings.design)));}
-  const alpha=new Uint8Array(n*n),pixels=context.getImageData(0,0,n,n).data;
-  for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
-  const frame=mesh?.artwork?.texture.frame||artworkFrame(alpha,n,settings.diameter,settings);
+  const rgba=context.getImageData(0,0,n,n).data,alpha=new Uint8Array(n*n);for(let i=0;i<alpha.length;i++)alpha[i]=rgba[i*4+3];
+  return {canvas,context,n,rgba,alpha};
+}
+function sourceInfo(snapshot,raw=null){
+  const s=snapshot.settings,key=JSON.stringify([snapshot.revision,snapshot.placement,s.design,s.diameter,s.hole,s.svgBacking,s.svgBackingMargin,s.markers,s.hourStyle,s.numberSize,s.numberPosition,s.hourFit]);
+  if(sourceInfoCache?.key===key)return sourceInfoCache;
+  raw ||=sourceRaster(snapshot);const frame=artworkFrame(raw.alpha,raw.n,s.diameter,s),layout=autoHourFit(s)?fitHourLayout(raw.alpha,raw.n,frame,s):null;
+  sourceInfoCache={key,frame,n:raw.n,layout};return sourceInfoCache;
+}
+function paintedRaster(snapshot,raw=null){
+  const settings=snapshot.settings;raw ||=sourceRaster(snapshot);
+  const {frame:sourceFrame,layout}=sourceInfo(snapshot,raw),n=raw.n,backed=usesSVGBacking(settings);
+  let canvas=raw.canvas,context=raw.context,frame=sourceFrame;
+  if(backed){
+    canvas=document.createElement('canvas');canvas.width=canvas.height=n;context=canvas.getContext('2d',{willReadFrequently:true});context.scale(n/400,n/400);
+    context.save();const scale=sourceFrame.scale*n/settings.diameter;context.transform(scale,0,0,scale,200-sourceFrame.cx*sourceFrame.scale*400/settings.diameter,200-sourceFrame.cy*sourceFrame.scale*400/settings.diameter);drawPlacedArtwork(context,snapshot.image,snapshot.placement);context.restore();
+    frame={scale:settings.diameter/n,cx:n/2,cy:n/2,n};
+  }
   if(!originalArtwork(settings)){context.globalCompositeOperation='source-in';context.fillStyle=settings.faceColor;context.fillRect(0,0,400,400);}
-  context.globalCompositeOperation='source-atop';paintHourDetails(context,settings,frame);
-  return {rgba:context.getImageData(0,0,n,n).data,width:n,height:n,frame,thickness:artworkSurfaceHeight(settings)};
+  context.globalCompositeOperation=backed&&autoHourFit(settings)?'source-over':'source-atop';paintHourDetails(context,settings,frame,layout);
+  return {canvas,frame,sourceFrame,n,rgba:context.getImageData(0,0,n,n).data};
+}
+async function ensureMesh(snapshot,signal,onStage=()=>{}){
+  const {settings,geometry}=snapshot;
+  try{
+    const result=await meshStore.get(geometry,async(jobSignal,stage)=>{
+      jobSignal.throwIfAborted();stage('outline');const raw=sourceRaster(snapshot);let artwork=null;
+      if(originalArtwork(settings)){
+        const paint=paintedRaster(snapshot,raw),png=await new Promise(resolve=>paint.canvas.toBlob(resolve,'image/png'));jobSignal.throwIfAborted();
+        if(!png)throw Error('The SVG color artwork could not be prepared.');
+        artwork={rgba:raw.rgba,texture:{png:new Uint8Array(await png.arrayBuffer()),frame:paint.frame,thickness:artworkSurfaceHeight(settings)}};
+      }
+      jobSignal.throwIfAborted();const mesh=await meshAsync(raw.alpha,raw.n,{...settings,exportFormat:'stl'},jobSignal,null,artwork,stage);
+      return {stlBuffer:mesh.stlBuffer,stats:mesh.stats,artwork:artwork?{texture:artwork.texture}:null};
+    },{signal,onStage});
+    if(lastGeometryError?.key===geometry)lastGeometryError=null;updatePrintSummary();return result;
+  }catch(error){if(error.name!=='AbortError'){lastGeometryError={key:geometry,message:error.message};updatePrintSummary();}throw error;}
+}
+function prepareFilamentRaster(snapshot){
+  const paint=paintedRaster(snapshot);return {rgba:paint.rgba,width:paint.n,height:paint.n,frame:paint.frame,thickness:artworkSurfaceHeight(snapshot.settings)};
 }
 function updateFilamentPreview(){
   const snapshot=designSnapshot(),settings=snapshot.settings;
   // Relief, thickness, hole size and recoloring do not change SVG quantization.
-  const key=JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgBacking,settings.svgBacking?settings.svgBackingMargin:null]:null,settings.diameter,settings.faceColor,settings.markers?[settings.hourStyle,settings.numberSize,settings.numberPosition]:false,settings.filamentCount,settings.bambuBackColor]);
+  const key=JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgBacking,settings.svgBacking?settings.svgBackingMargin:null,settings.hourFit,settings.markers?settings.hole:null]:null,settings.diameter,settings.faceColor,settings.markers?[settings.hourStyle,settings.numberSize,settings.numberPosition]:false,settings.filamentCount,settings.bambuBackColor]);
   filamentPreview.update({enabled:state.exportFormat==='3mf'&&state.threeMFTarget==='bambu-a1',busy:importPending||restorePending||deletingArtwork,key,snapshot,overrides:state.bambuColors});
 }
 const stageMessage=stage=>({outline:'Tracing the clock outline…',details:'Adding the printable details…',mesh:'Closing the print mesh…',package:'Preparing your 3MF file…',filaments:'Mapping your SVG colors to printable filaments…'}[stage]||'Checking your model…');
@@ -512,6 +558,11 @@ function updatePrintSummary(){
   $('printCheckStatus').textContent=stats?(stats.components>1?`${stats.components} separate pieces. Plan a backing or assembly before printing.`:'Closed print mesh checked. Add the movement and hands after printing.'):'Check the model to see its exact dimensions, relief, and separate parts.';
   $('printCheckStatus').dataset.tone=stats?(stats.components>1?'warning':'success'):'neutral';
   $('printCheckStatus').dataset.checked=String(!!stats);
+  const invalidPocket=state.mechanismRecess&&['recessWidth','recessHeight','recessDepth','recessClearance'].some(id=>$(id).value===''||!$(id).validity.valid);
+  const pocketError=invalidPocket?'Rear pocket: enter dimensions within the displayed ranges and steps.':state.mechanismRecess&&lastGeometryError?.key===key&&lastGeometryError.message.startsWith('Rear pocket:')?lastGeometryError.message:null;
+  $('recessError').hidden=!pocketError;$('recessError').textContent=pocketError||'';
+  $('backingForRecess').hidden=!state.mechanismRecess||state.design!=='custom'||(state.svgBacking&&state.svgBackingThickness>=state.recessDepth+RECESS_SKIN);
+  if(pocketError){$('printCheckStatus').textContent=pocketError;$('printCheckStatus').dataset.tone='warning';}
   const valid=[$('bedWidth'),$('bedDepth')].every(input=>input.value!==''&&input.validity.valid);
   const fit=stats?bedFit(stats.dimensions,bed.width,bed.depth):null;
   $('bedLabel').textContent=`${bed.width} × ${bed.depth} mm${valid&&fit?(fit.fits?' · Fits':' · Too small'):''}`;
@@ -562,7 +613,7 @@ $('checkModel').onclick=async()=>{
 };
 $('connectArtwork').onclick=async()=>{
   if(state.design!=='custom'||checkController||importPending||restorePending||deletingArtwork)return;
-  state.svgBacking=true;render({forceInputs:true});const requested=geometryKey();await $('checkModel').onclick();
+  state.svgBacking=true;makeRecessRoom();render({forceInputs:true});const requested=geometryKey();await $('checkModel').onclick();
   if(requested===geometryKey()&&meshStore.peek(requested)?.stats.components===1)toast('Your SVG now prints as one piece on a round backing.');
 };
 function setPreviewMode(mode){
@@ -570,6 +621,7 @@ function setPreviewMode(mode){
   for(const [id,active]of [['designPreview',mode==='design'],['printPreview',mode==='print']]){$(id).classList.toggle('selected',active);$(id).setAttribute('aria-selected',String(active));$(id).tabIndex=active?0:-1;}
   $('preview').dataset.mode=mode;$('clockObject').hidden=$('clockShadow').hidden=$('measureLine').hidden=mode==='print';
   $('showHandsRow').hidden=mode==='print';$('meshOptions').hidden=mode!=='print';$('previewBadge').textContent=mode==='print'?'Actual print model':'Design preview';
+  $('backView').hidden=mode!=='print';if(mode==='print')meshCamera(meshCameraView);else{$('backView').classList.remove('selected');view();}
   if(mode==='design'){clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=null;$('meshCanvas').hidden=$('meshState').hidden=true;meshView?.setVisible(false);}
   else scheduleMeshPreview(true);
 }
@@ -591,7 +643,7 @@ function scheduleMeshPreview(immediate=false){
       controller.signal.throwIfAborted();
       if(previewMode!=='print'||key!==geometryKey())return;
       if(!meshView){const {PrintView}=await import(meshViewURL.href);controller.signal.throwIfAborted();meshView=new PrintView($('meshCanvas'),{onError:error=>{meshView?.dispose();meshView=null;loadedMeshKey=null;$('meshCanvas').hidden=true;$('meshState').hidden=false;$('meshStateText').textContent=error.message;$('meshRetry').hidden=false;}});}
-      await meshView.setModel(result,snapshot.settings,{signal:controller.signal});controller.signal.throwIfAborted();
+      await meshView.setModel(result,snapshot.settings,{signal:controller.signal});controller.signal.throwIfAborted();meshCamera(meshCameraView);
       if(previewMode!=='print'||key!==geometryKey())return;
       loadedMeshKey=key;$('meshCanvas').dataset.geometryKey=key;$('meshCanvas').dataset.triangles=String(result.stats.triangles);
       $('meshCanvas').hidden=false;$('meshState').hidden=true;meshView.setAppearance(colors[state.color][1],$('meshColors').checked,$('meshWireframe').checked);meshView.setVisible(true);updatePrintSummary();

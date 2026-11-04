@@ -2547,7 +2547,7 @@
   }
 
   // mesh.js
-  var import_polygon_clipping3 = __toESM(require_polygon_clipping_umd(), 1);
+  var import_polygon_clipping5 = __toESM(require_polygon_clipping_umd(), 1);
 
   // contours.js
   var CONTOUR_SEGMENTS = [
@@ -2614,9 +2614,9 @@
     return rings;
   }
   function contourArea(ring) {
-    let area3 = 0;
-    for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) area3 += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
-    return area3 / 2;
+    let area4 = 0;
+    for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) area4 += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
+    return area4 / 2;
   }
   function pointSegmentDistanceSquared(point, a, b) {
     const dx = b[0] - a[0], dy = b[1] - a[1];
@@ -3278,7 +3278,7 @@
     const layers = input.map((layer) => {
       if (!Number.isFinite(layer.height) || layer.height <= previous) throw new RangeError("Layer heights must be positive and increasing.");
       previous = layer.height;
-      return { height: Math.fround(layer.height), polygons: normalize(layer.polygons) };
+      return { height: Math.fround(layer.height), polygons: normalize(layer.polygons), closeUnderside: layer.closeUnderside === true };
     });
     if (!layers[0].polygons.length) throw new RangeError("The clock face has no printable area.");
     const vertices = [], vertexIds = /* @__PURE__ */ new Map(), xyPoints = /* @__PURE__ */ new Map(), xyCells = /* @__PURE__ */ new Map(), triangles = [];
@@ -3339,6 +3339,7 @@
     cap(layers[0].polygons, 0, false);
     for (let i2 = 0; i2 < layers.length; i2++) {
       const { polygons, height } = layers[i2], low = i2 ? layers[i2 - 1].height : 0, next = layers[i2 + 1]?.polygons;
+      if (i2 && layers[i2].closeUnderside) cap(normalize(import_polygon_clipping.default.difference(polygons, layers[i2 - 1].polygons)), low, false);
       const exposed = next?.length ? normalize(import_polygon_clipping.default.difference(polygons, next)) : polygons;
       cap(exposed, height, true);
       for (const polygon of polygons) for (const ring of polygon) for (let j = 0; j < ring.length; j++) {
@@ -3575,7 +3576,7 @@
   function backingDepth(settings) {
     if (!usesSVGBacking(settings)) return 0;
     const value = settings.svgBackingThickness ?? 1.2;
-    if (!Number.isFinite(value) || value < 1 || value > 3) throw Error("Choose a backing thickness from 1 to 3 mm.");
+    if (!Number.isFinite(value) || value < 1 || value > 10) throw Error("Choose a backing thickness from 1 to 10 mm.");
     return value;
   }
   function artworkSurfaceHeight(settings) {
@@ -3666,10 +3667,153 @@
     return relief;
   }
 
+  // hour-layout.js
+  var import_polygon_clipping3 = __toESM(require_polygon_clipping_umd(), 1);
+  var snap2 = (value) => Math.round(value * 1e6) / 1e6;
+  var autoHourFit = (settings) => settings.design === "custom" && settings.hourFit === true && settings.markers;
+  function tickLabels(settings, padding = 0) {
+    const result = [], d = settings.diameter;
+    for (let hour = 1; hour <= 12; hour++) {
+      const length = d * (hour % 3 === 0 ? 17 : 10) / 400, w = d * 5 / 400 + padding * 2, h = length + padding * 2, r = Math.min(w * 0.35, h * 0.15), radius = d * 0.31 - length / 2, angle = hour * Math.PI / 6, s = Math.sin(angle), c = Math.cos(angle), x2 = s * radius, y = c * radius, ring = [];
+      for (const [cx, cy, start] of [[w / 2 - r, h / 2 - r, 0], [-w / 2 + r, h / 2 - r, 90], [-w / 2 + r, -h / 2 + r, 180], [w / 2 - r, -h / 2 + r, 270]]) for (let j = 0; j <= 5; j++) {
+        const a = (start + j * 18) * Math.PI / 180, px = cx + r * Math.cos(a), py = cy + r * Math.sin(a);
+        ring.push([snap2(x2 + px * c + py * s), snap2(y - px * s + py * c)]);
+      }
+      ring.push(ring[0]);
+      result.push({ hour, text: String(hour), x: x2, y, height: h, polygons: [[ring]] });
+    }
+    return result;
+  }
+  var sourceLabels = (settings, padding = 0) => ["arabic", "roman"].includes(settings.hourStyle) ? hourNumeralLabels(settings, padding) : tickLabels(settings, padding);
+  var bounds = (polygons) => {
+    const b = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const polygon of polygons) for (const ring of polygon) for (const [x2, y] of ring) {
+      b[0] = Math.min(b[0], x2);
+      b[1] = Math.min(b[1], y);
+      b[2] = Math.max(b[2], x2);
+      b[3] = Math.max(b[3], y);
+    }
+    return b;
+  };
+  function footprint(alpha, n, frame, settings) {
+    if (usesSVGBacking(settings)) return (b) => Math.max(...[[b[0], b[1]], [b[0], b[3]], [b[2], b[1]], [b[2], b[3]]].map(([x2, y]) => Math.hypot(x2, y))) <= settings.diameter / 2 - 0.6;
+    const stride = n + 1, invalid = new Uint32Array(stride * stride);
+    for (let y = 0; y < n; y++) {
+      let row = 0;
+      for (let x2 = 0; x2 < n; x2++) {
+        row += alpha[y * n + x2] < 128 ? 1 : 0;
+        invalid[(y + 1) * stride + x2 + 1] = invalid[y * stride + x2 + 1] + row;
+      }
+    }
+    return (b) => {
+      const x0 = Math.floor(b[0] / frame.scale + frame.cx), x1 = Math.ceil(b[2] / frame.scale + frame.cx), y0 = Math.floor(frame.cy - b[3] / frame.scale), y1 = Math.ceil(frame.cy - b[1] / frame.scale);
+      if (x0 < 0 || y0 < 0 || x1 >= n || y1 >= n) return false;
+      return invalid[(y1 + 1) * stride + x1 + 1] - invalid[y0 * stride + x1 + 1] - invalid[(y1 + 1) * stride + x0] + invalid[y0 * stride + x0] === 0;
+    };
+  }
+  function fitHourLayout(alpha, n, frame, settings) {
+    const originals = sourceLabels(settings);
+    if (!settings.markers) return { labels: [], missing: [], scale: 1 };
+    if (!autoHourFit(settings)) return { labels: originals.map((label) => ({ ...label, scale: 1 })), missing: [], scale: 1 };
+    const inside = footprint(alpha, n, frame, settings), clearance = 0.6, step = Math.max(0.4, settings.diameter / 350), maxRadius = settings.diameter * 0.8;
+    const minimum = settings.hourStyle === "ticks" ? Math.min(1, 0.6 / (settings.diameter * 5 / 400)) : Math.min(1, 4.2 / (originals[0]?.height || 4.2));
+    const limits = originals.map((label) => {
+      const b = bounds(label.polygons);
+      return { label, b: [b[0] - label.x, b[1] - label.y, b[2] - label.x, b[3] - label.y] };
+    });
+    let best = { labels: [], missing: originals.map((l) => l.hour), scale: 1 };
+    for (let scale = 1; ; scale = Math.max(minimum, scale * 0.9)) {
+      const options = limits.map(({ label, b }) => {
+        const angle = label.hour * Math.PI / 6, s = Math.sin(angle), c = Math.cos(angle), preferred = Math.hypot(label.x, label.y), radii = [preferred];
+        for (let r = step; r <= maxRadius; r += step) {
+          if (preferred - r > 0) radii.push(preferred - r);
+          if (preferred + r <= maxRadius) radii.push(preferred + r);
+        }
+        const candidates = [];
+        for (const radius of radii) {
+          const x2 = s * radius, y = c * radius, box = [x2 + b[0] * scale - clearance, y + b[1] * scale - clearance, x2 + b[2] * scale + clearance, y + b[3] * scale + clearance];
+          const nearX = box[0] <= 0 && box[2] >= 0 ? 0 : Math.min(Math.abs(box[0]), Math.abs(box[2])), nearY = box[1] <= 0 && box[3] >= 0 ? 0 : Math.min(Math.abs(box[1]), Math.abs(box[3]));
+          if (Math.hypot(nearX, nearY) > settings.hole / 2 + 0.6 && inside(box)) candidates.push({ x: x2, y, box });
+        }
+        return { label, candidates };
+      }).sort((a, b) => a.candidates.length - b.candidates.length || a.label.hour - b.label.hour);
+      const placed = [];
+      for (const { label, candidates } of options) {
+        const candidate = candidates.find(({ box: a }) => placed.every(({ box: b }) => a[2] + 0.3 < b[0] || b[2] + 0.3 < a[0] || a[3] + 0.3 < b[1] || b[3] + 0.3 < a[1]));
+        if (candidate) {
+          const { x: x2, y, box } = candidate, polygons = label.polygons.map((p) => p.map((r) => r.map(([px, py]) => [snap2(x2 + (px - label.x) * scale), snap2(y + (py - label.y) * scale)])));
+          placed.push({ ...label, x: snap2(x2), y: snap2(y), scale, box, polygons });
+        }
+      }
+      if (placed.length > best.labels.length) best = { labels: placed.sort((a, b) => a.hour - b.hour), missing: originals.filter((l) => !placed.some((p) => p.hour === l.hour)).map((l) => l.hour), scale };
+      if (placed.length === 12 || scale === minimum) return best;
+    }
+  }
+  function fittedHourPolygons(settings, layout, padding = 0) {
+    if (!layout.labels.length) return [];
+    if (!padding) return import_polygon_clipping3.default.union(...layout.labels.map((label) => label.polygons));
+    const originals = sourceLabels(settings, padding / layout.scale);
+    return import_polygon_clipping3.default.union(...layout.labels.map((placed) => {
+      const original = originals.find((label) => label.hour === placed.hour);
+      return original.polygons.map((p) => p.map((r) => r.map(([x2, y]) => [snap2(placed.x + (x2 - original.x) * placed.scale), snap2(placed.y + (y - original.y) * placed.scale)])));
+    }));
+  }
+  function hourLayoutMarkup(layout, project) {
+    return layout.labels.map((label) => `<path data-hour="${label.hour}" aria-label="${label.text}" d="${label.polygons.map((p) => p.map((r) => r.map(([x2, y], i2) => {
+      const point = project(x2, y);
+      return `${i2 ? "L" : "M"}${point[0]} ${point[1]}`;
+    }).join("") + "Z").join("")).join("")}" fill-rule="evenodd"/>`).join("");
+  }
+
+  // mechanism-recess.js
+  var import_polygon_clipping4 = __toESM(require_polygon_clipping_umd(), 1);
+  var RECESS_SKIN = 1.2;
+  var snap3 = (x2) => Math.round(x2 * 1e6) / 1e6;
+  function recessDimensions(settings) {
+    const width = settings.recessWidth ?? 55, height = settings.recessHeight ?? 55, depth = settings.recessDepth ?? 5.5, clearance = settings.recessClearance ?? 0.5;
+    if (![width, height, depth, clearance].every(Number.isFinite) || width < 5 || width > 90 || height < 5 || height > 90 || depth < 0.5 || depth > 8 || clearance < 0 || clearance > 2) throw Error("Rear pocket: choose valid movement dimensions, 0.5–8 mm depth, and 0–2 mm clearance.");
+    return { width: width + clearance * 2, height: height + clearance * 2, depth, clearance };
+  }
+  function rectangle(width, height, radius) {
+    if (!radius) return [[[-width / 2, -height / 2], [width / 2, -height / 2], [width / 2, height / 2], [-width / 2, height / 2], [-width / 2, -height / 2]]];
+    const points = [];
+    for (const [x2, y, start] of [[width / 2 - radius, height / 2 - radius, 0], [-width / 2 + radius, height / 2 - radius, 90], [-width / 2 + radius, -height / 2 + radius, 180], [width / 2 - radius, -height / 2 + radius, 270]]) for (let i2 = 0; i2 <= 12; i2++) {
+      const a = (start + i2 * 90 / 12) * Math.PI / 180;
+      points.push([snap3(x2 + radius * Math.cos(a)), snap3(y + radius * Math.sin(a))]);
+    }
+    points.push(points[0]);
+    return [points];
+  }
+  var area2 = (polygons) => polygons.reduce((sum, p) => sum + p.reduce((part, r, i2) => {
+    let a = 0;
+    for (let j = 0; j < r.length - 1; j++) a += r[j][0] * r[j + 1][1] - r[j + 1][0] * r[j][1];
+    return part + (i2 ? -1 : 1) * Math.abs(a / 2);
+  }, 0), 0);
+  function withMechanismRecess(layers, settings, shaft) {
+    if (!settings.mechanismRecess) return layers;
+    const { width, height, depth, clearance } = recessDimensions(settings), roof = depth + RECESS_SKIN;
+    if (roof > artworkSurfaceHeight(settings) + 1e-6) throw Error(`Rear pocket: leave at least ${RECESS_SKIN} mm of material in front. Increase face/backing thickness to at least ${Number(roof.toFixed(1))} mm or reduce pocket depth.`);
+    const support = layers.find((layer) => layer.height >= roof - 1e-6)?.polygons;
+    const filled = support?.length ? import_polygon_clipping4.default.union(support, [[shaft]]) : [];
+    const required = [rectangle(width + RECESS_SKIN * 2, height + RECESS_SKIN * 2, 0)];
+    if (!filled.length || area2(import_polygon_clipping4.default.difference(required, filled)) > 1e-5) throw Error("Rear pocket: the movement does not fit inside solid material at this depth. Add a thick round backing, reduce the pocket size, or use a shallower recess.");
+    const pocket = [rectangle(width, height, Math.min(1, clearance * 2))], result = [];
+    let low = 0;
+    for (const layer of layers) {
+      if (layer.height <= depth + 1e-7) result.push({ ...layer, polygons: import_polygon_clipping4.default.difference(layer.polygons, pocket) });
+      else if (low < depth - 1e-7) {
+        result.push({ height: depth, polygons: import_polygon_clipping4.default.difference(layer.polygons, pocket) });
+        result.push({ ...layer, closeUnderside: true });
+      } else result.push({ ...layer, ...Math.abs(low - depth) < 1e-7 ? { closeUnderside: true } : {} });
+      low = layer.height;
+    }
+    return result;
+  }
+
   // mesh.js
   var CURVE_ERROR = 0.02;
-  var snap2 = (value) => Math.round(value * 1e6) / 1e6;
-  function area2(ring) {
+  var snap4 = (value) => Math.round(value * 1e6) / 1e6;
+  function area3(ring) {
     let sum = 0;
     for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) sum += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
     return sum / 2;
@@ -3683,8 +3827,8 @@
     return inside;
   }
   function closed(ring, positive = true) {
-    if (area2(ring) > 0 !== positive) ring.reverse();
-    const points = ring.map(([x2, y]) => [snap2(x2), snap2(y)]);
+    if (area3(ring) > 0 !== positive) ring.reverse();
+    const points = ring.map(([x2, y]) => [snap4(x2), snap4(y)]);
     return [...points, points[0]];
   }
   function silhouette(alpha, n, diameter, frame = null, threshold = 127.5) {
@@ -3705,7 +3849,7 @@
     frame ||= { scale: diameter / span, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
     const { scale, cx, cy } = frame;
     if (!Number.isFinite(scale) || span <= 0) throw Error("The SVG outline could not be measured.");
-    const rings = source.map((ring) => simplifyRing(ring, CURVE_ERROR / scale).map(([x2, y]) => [(x2 - cx) * scale, (cy - y) * scale])).filter((ring) => ring.length >= 3 && Math.abs(area2(ring)) > 1e-6).map((ring) => ({ ring, size: Math.abs(area2(ring)), depth: 0, parent: null, polygon: null })).sort((a, b) => b.size - a.size);
+    const rings = source.map((ring) => simplifyRing(ring, CURVE_ERROR / scale).map(([x2, y]) => [(x2 - cx) * scale, (cy - y) * scale])).filter((ring) => ring.length >= 3 && Math.abs(area3(ring)) > 1e-6).map((ring) => ({ ring, size: Math.abs(area3(ring)), depth: 0, parent: null, polygon: null })).sort((a, b) => b.size - a.size);
     const result = [];
     for (let i2 = 0; i2 < rings.length; i2++) {
       const entry = rings[i2];
@@ -3740,7 +3884,7 @@
     const count = Math.ceil(Math.max(minimum, Math.ceil(Math.PI / Math.acos(Math.max(-1, 1 - error / radius)))) / 4) * 4;
     return Array.from({ length: count + 1 }, (_, i2) => {
       const a = i2 % count / count * Math.PI * 2;
-      return [snap2(radius * Math.cos(a)), snap2(radius * Math.sin(a))];
+      return [snap4(radius * Math.cos(a)), snap4(radius * Math.sin(a))];
     });
   }
   function shaftOpening(diameter) {
@@ -3780,7 +3924,7 @@
         strips.push([closed(ring)]);
       }
     }
-    return import_polygon_clipping3.default.union(...strips);
+    return import_polygon_clipping5.default.union(...strips);
   }
   function buildClockLayers(alpha, n, settings, progress = () => {
   }, artwork = null) {
@@ -3789,23 +3933,27 @@
     if (![diameter, settings.thickness, thickness, hole].every((value) => Number.isFinite(value) && value > 0) || !["smooth", "ripple", "grain"].includes(texture)) throw Error("The clock dimensions or texture are invalid.");
     progress("outline");
     const { polygons: outline, frame } = silhouette(alpha, n, diameter, backed ? artworkFrame(alpha, n, diameter, settings) : null);
-    const opening = shaftOpening(hole), base = import_polygon_clipping3.default.difference(outline, [[opening]]);
+    const opening = shaftOpening(hole), automatic = autoHourFit(settings), layout = automatic ? fitHourLayout(alpha, n, frame, settings) : null, fitted = automatic ? fittedHourPolygons(settings, layout) : [];
+    if (automatic && layout.missing.length) throw Error("Some hours cannot fit inside this SVG as complete labels. Add a round backing for all 12 hours, reduce the number size, or choose manual placement.");
+    let base = import_polygon_clipping5.default.difference(outline, [[opening]]);
     if (!base.length) throw Error("The center opening covers the entire clock face.");
+    if (backed && fitted.length) base = import_polygon_clipping5.default.union(base, fitted);
     const layers = backed ? [
-      { height: backingDepth(settings), polygons: import_polygon_clipping3.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
+      { height: backingDepth(settings), polygons: import_polygon_clipping5.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
       { height: thickness, polygons: base }
     ] : [{ height: thickness, polygons: base }];
     progress("details");
     const detailed = !!artwork?.rgba && settings.design === "custom" && settings.svgDetail !== "silhouette";
-    if (texture === "smooth" && !markers && !detailed) return layers;
+    const finish = () => withMechanismRecess(layers, settings, opening);
+    if (texture === "smooth" && !markers && !detailed) return finish();
     const rimPixels = Math.max(1, Math.ceil(0.3 / frame.scale));
     const detailOutline = silhouette(insetAlpha(alpha, n, rimPixels), n, diameter, frame).polygons;
-    const detailRegion = detailOutline.length ? import_polygon_clipping3.default.difference(detailOutline, [[circle(hole / 2 + 0.3, 1e-3, 128)]]) : [];
+    const detailRegion = detailOutline.length ? import_polygon_clipping5.default.difference(detailOutline, [[circle(hole / 2 + 0.3, 1e-3, 128)]]) : [];
     const useNumerals = ["arabic", "roman"].includes(settings.hourStyle);
     const markerShapes = markers ? useNumerals ? hourNumeralPolygons(settings) : markerPolygons(diameter) : [];
-    const markerOutline = markers ? silhouette(insetAlpha(alpha, n, rimPixels + 1), n, diameter, frame).polygons : [];
-    const markerRegion = markerOutline.length ? import_polygon_clipping3.default.difference(markerOutline, [[circle(hole / 2 + 0.3 + frame.scale, 1e-3, 128)]]) : [];
-    const ticks = markers && markerRegion.length ? import_polygon_clipping3.default.intersection(markerRegion, markerShapes) : [];
+    const markerOutline = markers && !automatic ? silhouette(insetAlpha(alpha, n, rimPixels + 1), n, diameter, frame).polygons : [];
+    const markerRegion = markerOutline.length ? import_polygon_clipping5.default.difference(markerOutline, [[circle(hole / 2 + 0.3 + frame.scale, 1e-3, 128)]]) : [];
+    const ticks = automatic ? fitted : markers && markerRegion.length ? import_polygon_clipping5.default.intersection(markerRegion, markerShapes) : [];
     if (detailed) {
       const height = settings.svgRelief ?? 0.8;
       if (!Number.isFinite(height) || height < 0 || height > 2) throw Error("SVG relief must be between 0 and 2 mm.");
@@ -3815,9 +3963,9 @@
         const steps = Math.max(1, Math.min(8, Math.round(height / 0.2)));
         for (let level = 1; level <= steps; level++) {
           const region = silhouette(relief, n, diameter, frame, (level - 0.5) * 255 / steps).polygons;
-          const detail = region.length && previous.length ? import_polygon_clipping3.default.intersection(previous, region) : [];
+          const detail = region.length && previous.length ? import_polygon_clipping5.default.intersection(previous, region) : [];
           previous = detail;
-          const raised = ticks.length ? detail.length ? import_polygon_clipping3.default.union(detail, ticks) : ticks : detail;
+          const raised = ticks.length ? detail.length ? import_polygon_clipping5.default.union(detail, ticks) : ticks : detail;
           if (raised.length) {
             top = thickness + height * level / steps;
             layers.push({ height: top, polygons: raised });
@@ -3825,23 +3973,24 @@
         }
       }
       if (ticks.length) layers.push({ height: top + 0.8, polygons: ticks });
-      return layers;
+      return finish();
     }
     if (texture !== "smooth") {
       let pattern = texture === "ripple" ? ripplePolygons(diameter) : hatchPolygons(diameter);
       let first = [];
       if (useNumerals && markers) {
-        pattern = import_polygon_clipping3.default.difference(pattern, hourNumeralPolygons(settings, 0.6));
-        const textureArea = detailRegion.length ? import_polygon_clipping3.default.intersection(detailRegion, pattern) : [];
-        first = textureArea.length && ticks.length ? import_polygon_clipping3.default.union(textureArea, ticks) : ticks.length ? ticks : textureArea;
+        pattern = import_polygon_clipping5.default.difference(pattern, automatic ? fittedHourPolygons(settings, layout, 0.6) : hourNumeralPolygons(settings, 0.6));
+        const textureArea = detailRegion.length ? import_polygon_clipping5.default.intersection(detailRegion, pattern) : [];
+        first = textureArea.length && ticks.length ? import_polygon_clipping5.default.union(textureArea, ticks) : ticks.length ? ticks : textureArea;
       } else {
-        const foundation = markers ? import_polygon_clipping3.default.union(pattern, markerPolygons(diameter, 0.15)) : pattern;
-        first = detailRegion.length ? import_polygon_clipping3.default.intersection(detailRegion, foundation) : [];
+        const foundation = markers ? import_polygon_clipping5.default.union(pattern, markerPolygons(diameter, 0.15)) : pattern;
+        first = detailRegion.length ? import_polygon_clipping5.default.intersection(detailRegion, foundation) : [];
       }
+      if (automatic && ticks.length) first = first.length ? import_polygon_clipping5.default.union(first, ticks) : ticks;
       if (first.length) layers.push({ height: thickness + 0.4, polygons: first });
     }
     if (ticks.length) layers.push({ height: thickness + 0.8, polygons: ticks });
-    return layers;
+    return finish();
   }
   function makeClockSTL(alpha, n, settings, progress = () => {
   }, artwork = null) {
@@ -4842,13 +4991,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     function split(vertices, depth) {
       if (++budget.nodes > 2e6) throw Error("The SVG color map is too complex. Choose fewer filaments or simplify its smallest details.");
       const centroid = [0, 1].map((k) => (vertices[0][k] + vertices[1][k] + vertices[2][k]) / 3), color = sample(...centroid);
-      const bounds = [0, 1].map((k) => [Math.floor(Math.min(...vertices.map((p) => p[k]))), Math.floor(Math.max(...vertices.map((p) => p[k])))]);
+      const bounds2 = [0, 1].map((k) => [Math.floor(Math.min(...vertices.map((p) => p[k]))), Math.floor(Math.max(...vertices.map((p) => p[k])))]);
       const lengths = vertices.map((a2, i2) => {
         const b2 = vertices[(i2 + 1) % 3];
         return (a2[0] - b2[0]) ** 2 + (a2[1] - b2[1]) ** 2;
       });
       const longest = Math.max(...lengths);
-      if (longest <= tolerance * tolerance || depth >= 20 || uniformRectangle(paint, bounds[0][0], bounds[1][0], bounds[0][1], bounds[1][1], 1 << color)) return { code: filamentCode(color), color };
+      if (longest <= tolerance * tolerance || depth >= 20 || uniformRectangle(paint, bounds2[0][0], bounds2[1][0], bounds2[0][1], bounds2[1][1], 1 << color)) return { code: filamentCode(color), color };
       const special = (lengths.indexOf(longest) + 2) % 3, [a, b, c] = [0, 1, 2].map((i2) => vertices[(special + i2) % 3]), middle = midpoint(b, c);
       const left = split([a, b, middle], depth + 1), right = split([middle, c, a], depth + 1);
       if (left.color >= 0 && left.color === right.color) return left;
@@ -4899,9 +5048,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
 
   // project.js
   var MAX_PROJECT_BYTES = 12 * 1024 * 1024;
-  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}), svgBacking: false, svgBackingThickness: 1.2, svgBackingMargin: 3 });
+  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}), svgBacking: false, svgBackingThickness: 1.2, svgBackingMargin: 3, hourFit: true, mechanismRecess: false, recessWidth: 55, recessHeight: 55, recessDepth: 5.5, recessClearance: 0.5 });
   var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] };
-  var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.1], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2], svgBackingThickness: [1, 3, 0.2], svgBackingMargin: [1, 12, 0.5] };
+  var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.1], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2], svgBackingThickness: [1, 10, 0.2], svgBackingMargin: [1, 12, 0.5], recessWidth: [5, 90, 0.5], recessHeight: [5, 90, 0.5], recessDepth: [0.5, 8, 0.1], recessClearance: [0, 2, 0.1] };
   var bytes = (value) => new TextEncoder().encode(value).byteLength;
   var record2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   function projectName(value) {
@@ -4916,7 +5065,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       const value = Number(input[key]);
       if (input[key] != null && Number.isFinite(value)) settings[key] = Number(Math.min(max, Math.max(min, Math.round(value / step) * step)).toFixed(5));
     }
-    for (const key of ["markers", "showHands", "svgBacking"]) if (typeof input[key] === "boolean") settings[key] = input[key];
+    for (const key of ["markers", "showHands", "svgBacking", "hourFit", "mechanismRecess"]) if (typeof input[key] === "boolean") settings[key] = input[key];
     return settings;
   }
   function checkedArtwork(value) {
@@ -4940,7 +5089,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       const value = data.settings[key];
       if (value !== void 0 && (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max || Math.abs(value / step - Math.round(value / step)) > 1e-6)) throw Error(`The project has an invalid ${key} setting.`);
     }
-    for (const key of ["markers", "showHands", "svgBacking"]) if (data.settings[key] !== void 0 && typeof data.settings[key] !== "boolean") throw Error(`The project has an invalid ${key} setting.`);
+    for (const key of ["markers", "showHands", "svgBacking", "hourFit", "mechanismRecess"]) if (data.settings[key] !== void 0 && typeof data.settings[key] !== "boolean") throw Error(`The project has an invalid ${key} setting.`);
     if (data.settings.bambuColors !== void 0 && !validFilamentOverrides(data.settings.bambuColors)) throw Error("The project has invalid filament colors.");
     const settings = normalizeSettings(data.settings), artwork = checkedArtwork(data.artwork), orientation = normalizeOrientation(data.orientation);
     if (settings.design === "custom" && !artwork) throw Error("The project is missing its imported SVG.");
@@ -5349,7 +5498,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   };
 
   // hole-fit.js
-  var import_polygon_clipping4 = __toESM(require_polygon_clipping_umd(), 1);
+  var import_polygon_clipping6 = __toESM(require_polygon_clipping_umd(), 1);
   var round = (value) => Math.round(value * 1e6) / 1e6;
   var DIGITS = ["abcdef", "bc", "abdeg", "abcdg", "bcfg", "acdfg", "acdefg", "abc", "abcdefg", "abcdfg"];
   var SEGMENTS = { a: [0.25, 3.6, 2.25, 4.2], b: [1.9, 1.9, 2.5, 4], c: [1.9, 0.2, 2.5, 2.3], d: [0.25, 0, 2.25, 0.6], e: [0, 0.2, 0.6, 2.3], f: [0, 1.9, 0.6, 4], g: [0.25, 1.8, 2.25, 2.4] };
@@ -5364,7 +5513,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       offset += (char === "." ? 0.7 : 2.5) + 0.8;
     }
-    return import_polygon_clipping4.default.union(...rectangles);
+    return import_polygon_clipping6.default.union(...rectangles);
   }
   function roundedRectangle(width, height) {
     const radius = 3, ring = [];
@@ -5380,12 +5529,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const sizes = Array.from({ length: 5 }, (_, i2) => (first + i2 * 2) / 10), largest = sizes.at(-1), cell = largest + 6, width = round(cell * 5 + 8), depth = round(largest + 14), thickness = 2, relief = 0.6;
     const holes = sizes.map((diameter, i2) => ({ diameter, x: round(-width / 2 + 4 + cell * (i2 + 0.5)), y: 3.5 }));
     const outline = roundedRectangle(width, depth), openings = holes.map(({ diameter, x: x2, y }) => [shaftOpening(diameter).map(([px, py]) => [round(px + x2), round(py + y)])]);
-    const base = import_polygon_clipping4.default.difference([[outline]], ...openings);
+    const base = import_polygon_clipping6.default.difference([[outline]], ...openings);
     const labels = holes.map(({ diameter, x: x2 }) => ({ text: diameter.toFixed(1), polygons: labelPolygons(diameter.toFixed(1), x2, -depth / 2 + 4) }));
     return { center, sizes, width, depth, thickness, relief, holes, base, labels };
   }
   function makeFitTestSTL(center) {
-    const plan = fitTestPlan(center), letters = import_polygon_clipping4.default.union(...plan.labels.map((label) => label.polygons));
+    const plan = fitTestPlan(center), letters = import_polygon_clipping6.default.union(...plan.labels.map((label) => label.polygons));
     return extrudeLayers([{ height: plan.thickness, polygons: plan.base }, { height: plan.thickness + plan.relief, polygons: letters }]);
   }
 
@@ -5610,6 +5759,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   var exportController = null;
   var applyingHistory = false;
   var backingViewCache = null;
+  var sourceInfoCache = null;
+  var lastGeometryError = null;
+  var meshCameraView = "angle";
   var previewMode = "design";
   var meshView = null;
   var loadedMeshKey = null;
@@ -5632,7 +5784,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return settings.design === "custom" && settings.svgDetail === "artwork";
   }
   function geometryKey(settings = state) {
-    return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone, settings.svgBacking, settings.svgBacking ? [settings.svgBackingThickness, settings.svgBackingMargin] : null] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? settings.hourStyle : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null]);
+    return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone, settings.svgBacking, settings.svgBacking ? [settings.svgBackingThickness, settings.svgBackingMargin] : null, settings.hourFit] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? settings.hourStyle : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null, settings.mechanismRecess ? [settings.recessWidth, settings.recessHeight, settings.recessDepth, settings.recessClearance] : false]);
   }
   function fileKey(settings = state) {
     return JSON.stringify([geometryKey(settings), settings.exportFormat, settings.exportFormat === "3mf" ? [colors[settings.color][1], settings.threeMFTarget, settings.threeMFTarget === "bambu-a1" ? [settings.filamentCount, settings.bambuBackColor, Object.entries(settings.bambuColors).sort()] : null] : null]);
@@ -5672,7 +5824,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   function backingViewTransform() {
     const key = JSON.stringify([customRevision, artworkOrientation, state.diameter, state.svgBackingMargin]);
     if (backingViewCache?.key === key) return backingViewCache.transform;
-    const { frame, width: n } = prepareFilamentRaster(designSnapshot()), scale = frame.scale * n / 400 * 360 / state.diameter;
+    const { frame, n } = sourceInfo(designSnapshot()), scale = frame.scale * n / 400 * 360 / state.diameter;
     const transform = `matrix(${scale} 0 0 ${scale} ${200 - frame.cx * frame.scale * 360 / state.diameter} ${200 - frame.cy * frame.scale * 360 / state.diameter})`;
     backingViewCache = { key, transform };
     return transform;
@@ -5683,7 +5835,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   }
   function render({ forceInputs = false, historyGroup = null, recordHistory = true } = {}) {
     const color = colors[state.color][1], detailed = originalArtwork(), backed = usesSVGBacking(state);
-    const nextPreviewKey = JSON.stringify([state.design, state.color, state.texture, state.markers, state.hourStyle, state.numberSize, state.numberPosition, state.diameter, state.svgDetail, customRevision, artworkOrientation, backed, backed ? [state.svgBackingMargin, state.hole] : null]);
+    const nextPreviewKey = JSON.stringify([state.design, state.color, state.texture, state.markers, state.hourStyle, state.numberSize, state.numberPosition, state.diameter, state.svgDetail, customRevision, artworkOrientation, backed, state.hourFit, backed || autoHourFit(state) ? [state.svgBackingMargin, state.hole] : null]);
     if (nextPreviewKey !== previewKey) {
       let ticks = "", numberClearance = "";
       if (state.markers && state.hourStyle !== "ticks") {
@@ -5692,6 +5844,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       if (state.markers && state.hourStyle === "ticks") for (let i2 = 0; i2 < 12; i2++) ticks += `<rect x="197.5" y="76" width="5" height="${i2 % 3 === 0 ? 17 : 10}" rx="2" transform="rotate(${i2 * 30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
       if (backed) ticks = `<g transform="translate(200 200) scale(0.9) translate(-200 -200)">${ticks}</g>`;
+      if (autoHourFit(state)) {
+        const { layout, frame, n } = sourceInfo(designSnapshot()), project = backed ? (x2, y) => [200 + x2 * 360 / state.diameter, 200 - y * 360 / state.diameter] : (x2, y) => [(x2 / frame.scale + frame.cx) * 400 / n, (frame.cy - y / frame.scale) * 400 / n];
+        const markup = hourLayoutMarkup(layout, project);
+        ticks = `<g id="hourOverlay" fill="#f5e5cd"><g${state.hourStyle !== "ticks" ? ' id="hourNumerals"' : ""}>${markup}</g></g>`;
+        if (state.hourStyle !== "ticks") numberClearance = `<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2 * (backed ? 360 / state.diameter : 400 / (n * frame.scale))}" stroke-linejoin="round">${markup}</g></mask>`;
+      }
       $("clockSvg").innerHTML = `<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance ? ' mask="url(#numberClearanceMask)"' : ""}>${state.texture === "ripple" ? Array.from({ length: 44 }, (_, i2) => `<circle cx="200" cy="200" r="${12 + i2 * 4}" fill="none" stroke="${i2 % 2 ? "#fff0da" : "#774832"}" stroke-opacity="${i2 % 2 ? ".18" : ".23"}" stroke-width=".8"/>`).join("") : state.texture === "grain" ? '<rect width="400" height="400" fill="url(#ridges)"/>' : ""}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g id="previewHands" style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
       if (detailed) {
         const painted = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -5704,6 +5862,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       if (backed) {
         const svg = $("clockSvg"), ns = "http://www.w3.org/2000/svg", circle2 = document.createElementNS(ns, "circle"), mask = document.createElementNS(ns, "mask"), group = document.createElementNS(ns, "g");
+        if (autoHourFit(state) && $("hourOverlay")) svg.insertBefore($("hourOverlay"), $("previewHands"));
         circle2.id = "svgBackingPreview";
         circle2.setAttribute("cx", "200");
         circle2.setAttribute("cy", "200");
@@ -5718,7 +5877,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         mask.setAttribute("height", "400");
         mask.innerHTML = `<rect width="400" height="400" fill="white"/><circle cx="200" cy="200" r="${state.hole / state.diameter * 180}" fill="black"/>`;
         svg.querySelector("defs").append(mask);
-        svg.querySelector("#numberClearanceMask g")?.setAttribute("transform", "translate(200 200) scale(0.9) translate(-200 -200)");
+        if (!autoHourFit(state)) svg.querySelector("#numberClearanceMask g")?.setAttribute("transform", "translate(200 200) scale(0.9) translate(-200 -200)");
         group.setAttribute("mask", "url(#backingShaftMask)");
         for (const child of [...svg.children]) if (child.tagName.toLowerCase() !== "defs" && child.id !== "previewHands") group.append(child);
         svg.insertBefore(group, $("previewHands"));
@@ -5764,6 +5923,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("downloadGuide").hidden = lastDownloadKey !== fileKey();
     $("hourStyle").value = state.hourStyle;
     $("hourStyle").disabled = !state.markers;
+    $("hourFit").checked = state.hourFit;
+    $("hourFitControls").hidden = state.design !== "custom" || !state.markers;
+    const fitted = autoHourFit(state) ? sourceInfo(designSnapshot()).layout : null;
+    $("hourFitStatus").textContent = fitted ? `${fitted.labels.length}/12 hours fit${fitted.scale < 0.999 ? " · " + Math.round(fitted.scale * 100) + "% of requested size" : ""}.${fitted.missing.length ? " A round backing can support the remaining hours." : ""}` : "Manual circle placement. Numbers may be clipped at the SVG edge.";
+    $("hourFitStatus").dataset.tone = fitted?.missing.length ? "warning" : "success";
+    $("backingForHours").hidden = !fitted?.missing.length;
     $("numeralOptions").hidden = !state.markers || state.hourStyle === "ticks";
     for (const id of ["numberSize", "numberPosition"]) {
       $(id).value = state[id];
@@ -5788,6 +5953,16 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("showHands").checked = state.showHands;
     const hands = $("clockSvg").querySelector("#previewHands");
     if (hands) hands.toggleAttribute("hidden", !state.showHands);
+    $("mechanismRecess").checked = state.mechanismRecess;
+    $("recessOptions").hidden = !state.mechanismRecess;
+    for (const id of ["recessWidth", "recessHeight", "recessDepth", "recessClearance"]) if (forceInputs || document.activeElement !== $(id) && !$(id).dataset.editing) {
+      $(id).value = state[id];
+      if (forceInputs) delete $(id).dataset.editing;
+    }
+    const pocket = recessDimensions(state);
+    $("recessSummary").textContent = `Pocket: ${pocket.width} × ${pocket.height} mm · ${pocket.depth} mm deep. Keeps at least ${RECESS_SKIN} mm of front material. Verify your movement dimensions before printing.`;
+    $("supportBadge").textContent = state.mechanismRecess ? "Rear pocket · check supports" : "No supports needed";
+    $("printabilitySummary").textContent = state.mechanismRecess ? "Rear pocket · review orientation and supports" : "✓ Flat back · no supports needed";
     updateArtworkUI();
     validateDimensions();
     persist();
@@ -5929,13 +6104,16 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     render();
   });
   function validateDimensions(focus = false) {
-    const ids = ["diameterNumber", "thickness", "hole"], invalid = ids.map($).find((input) => input.value === "" || !input.validity.valid);
+    const ids = ["diameterNumber", "thickness", "hole", ...state.mechanismRecess ? ["recessWidth", "recessHeight", "recessDepth", "recessClearance"] : []], invalid = ids.map($).find((input) => input.value === "" || !input.validity.valid);
     for (const id of ids) $(id).setAttribute("aria-invalid", String($(id).value === "" || !$(id).validity.valid));
-    $("dimensionError").hidden = !invalid || invalid.id === "diameterNumber";
+    $("dimensionError").hidden = !invalid || invalid.id === "diameterNumber" || invalid.id.startsWith("recess");
     $("sizeError").hidden = !invalid || invalid.id !== "diameterNumber";
     if (invalid) {
       const size = invalid.id === "diameterNumber";
-      $(size ? "sizeError" : "dimensionError").textContent = size ? "Enter a diameter from 100 to 300 mm, in steps of 1 mm." : invalid.id === "hole" ? "Enter a center hole from 5 to 15 mm, in steps of 0.1 mm." : "Enter a face thickness from 2 to 10 mm, in steps of 0.5 mm.";
+      if (invalid.id.startsWith("recess")) {
+        $("recessError").hidden = false;
+        $("recessError").textContent = "Rear pocket: enter dimensions within the displayed ranges and steps.";
+      } else $(size ? "sizeError" : "dimensionError").textContent = size ? "Enter a diameter from 100 to 300 mm, in steps of 1 mm." : invalid.id === "hole" ? "Enter a center hole from 5 to 15 mm, in steps of 0.1 mm." : "Enter a face thickness from 2 to 10 mm, in steps of 0.5 mm.";
       if (focus) {
         if (!size) document.querySelector(".advanced-settings").open = true;
         invalid.focus();
@@ -5954,10 +6132,29 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   $("diameterNumber").addEventListener("blur", () => {
     if (validateDimensions()) delete $("diameterNumber").dataset.editing;
   });
-  ["diameter", "thickness", "hole", "markers", "svgBacking"].forEach((id) => $(id).addEventListener("input", () => {
-    const input = $(id);
-    if (id === "markers" || id === "svgBacking") state[id] = input.checked;
+  function makeRecessRoom() {
+    if (!state.mechanismRecess) return;
+    const required = state.recessDepth + RECESS_SKIN;
+    if (usesSVGBacking(state)) state.svgBackingThickness = Math.max(state.svgBackingThickness, Math.ceil((required - 1e-7) * 5) / 5);
     else {
+      state.thickness = Math.max(state.thickness, Math.ceil((required - 1e-7) * 2) / 2);
+      delete $("thickness").dataset.editing;
+      $("thickness").value = state.thickness;
+    }
+  }
+  function enableSupportingBacking() {
+    state.svgBacking = true;
+    makeRecessRoom();
+    render({ forceInputs: true });
+  }
+  $("backingForHours").onclick = enableSupportingBacking;
+  $("backingForRecess").onclick = enableSupportingBacking;
+  ["diameter", "thickness", "hole", "markers", "svgBacking", "hourFit", "mechanismRecess"].forEach((id) => $(id).addEventListener("input", () => {
+    const input = $(id);
+    if (["markers", "svgBacking", "hourFit", "mechanismRecess"].includes(id)) {
+      state[id] = input.checked;
+      if ((id === "mechanismRecess" || id === "svgBacking") && input.checked) makeRecessRoom();
+    } else {
       if (id !== "diameter") input.dataset.editing = "true";
       if (!input.validity.valid || input.value === "") {
         validateDimensions();
@@ -5966,8 +6163,25 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       state[id] = Number(input.value);
     }
     validateDimensions();
-    render({ historyGroup: ["markers", "svgBacking"].includes(id) ? null : id });
+    render({ historyGroup: ["markers", "svgBacking", "hourFit", "mechanismRecess"].includes(id) ? null : id });
   }));
+  for (const id of ["recessWidth", "recessHeight", "recessDepth", "recessClearance"]) $(id).addEventListener("input", () => {
+    $(id).dataset.editing = "true";
+    $(id).setAttribute("aria-invalid", String($(id).value === "" || !$(id).validity.valid));
+    if ($(id).value === "" || !$(id).validity.valid) {
+      validateDimensions();
+      return;
+    }
+    state[id] = Number($(id).value);
+    if (id === "recessDepth") makeRecessRoom();
+    render({ historyGroup: id });
+  });
+  for (const id of ["recessWidth", "recessHeight", "recessDepth", "recessClearance"]) $(id).addEventListener("blur", () => {
+    if ($(id).value !== "" && $(id).validity.valid) {
+      delete $(id).dataset.editing;
+      $(id).value = state[id];
+    }
+  });
   for (const id of ["hourStyle", "exportFormat", "svgDetail", "svgTone", "threeMFTarget", "filamentCount", "bambuBackColor"]) $(id).addEventListener("change", () => {
     const value = id === "filamentCount" ? Number($(id).value) : $(id).value, allowed = { hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] }[id];
     if (!allowed.includes(value)) return;
@@ -6062,9 +6276,15 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("frontView").classList.toggle("selected", front);
     $("angleView").classList.toggle("selected", !front);
   }
+  function meshCamera(mode) {
+    meshCameraView = mode;
+    meshView?.setView(mode);
+    $("meshBed").disabled = mode === "back";
+    for (const [id, view2] of [["frontView", "front"], ["angleView", "angle"], ["backView", "back"]]) $(id).classList.toggle("selected", mode === view2);
+  }
   $("frontView").onclick = () => {
     if (previewMode === "print") {
-      meshView?.setView("front");
+      meshCamera("front");
       return;
     }
     rx = ry = rz = 0;
@@ -6072,7 +6292,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   };
   $("angleView").onclick = () => {
     if (previewMode === "print") {
-      meshView?.setView("angle");
+      meshCamera("angle");
       return;
     }
     rx = 12;
@@ -6080,9 +6300,10 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     rz = -7;
     view();
   };
+  $("backView").onclick = () => meshCamera("back");
   $("restoreView").onclick = () => {
     if (previewMode === "print") {
-      meshView?.setView("angle");
+      meshCamera("angle");
       return;
     }
     zoom = 1;
@@ -6495,10 +6716,10 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const steps = bambu ? [
       "Open the .3mf in Bambu Studio and choose “Open as project” to load its colors.",
       "Choose your actual filament presets and match each numbered color to an AMS spool.",
-      "Check the flat side is on the plate, review flushing volumes, then slice and print."
+      settings.mechanismRecess ? "Inspect the rear pocket, print orientation and supports; review flushing volumes, then slice and print." : "Check the flat side is on the plate, review flushing volumes, then slice and print."
     ] : [
       `Open the .${settings.exportFormat} file in your printer’s slicer.`,
-      "Place the flat side on the print bed and check the dimensions.",
+      settings.mechanismRecess ? "Review the rear pocket, print orientation and support settings in your slicer." : "Place the flat side on the print bed and check the dimensions.",
       "Slice and print, then fit your clock movement and hands."
     ];
     $("downloadSteps").replaceChildren(...steps.map((text) => {
@@ -6509,19 +6730,26 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("downloadNote").textContent = bambu ? "A1 · 0.4 mm nozzle. Up to 4 colors with one AMS Lite. Reopen your .clock project in Clock Factory to edit the design." : settings.exportFormat === "stl" ? "STL contains the shape and raised details. For colored SVG artwork on your A1, choose Bambu A1 · colors above." : "Standard 3MF contains a color texture. For AMS filament assignments, choose Bambu A1 · colors above.";
     toast(fileKey() === key ? "Your print file is ready. Next steps are below the download button." : `Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
   }
-  function paintHourDetails(context, settings, frame = null) {
+  function paintHourDetails(context, settings, frame = null, layout = null) {
     if (!settings.markers) return;
     context.save();
     context.fillStyle = "#f5e5cd";
-    if (frame && usesSVGBacking(settings)) {
-      const scale = settings.diameter / (frame.n * frame.scale);
-      context.transform(scale, 0, 0, scale, frame.cx * 400 / frame.n - 200 * scale, frame.cy * 400 / frame.n - 200 * scale);
-    }
-    if (settings.hourStyle !== "ticks") {
-      const svg = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${hourNumeralMarkup(settings)}</svg>`, "image/svg+xml");
-      for (const path2 of svg.querySelectorAll("path")) context.fill(new Path2D(path2.getAttribute("d")), "evenodd");
+    if (layout) {
+      const scale = 400 / (frame.n * frame.scale);
+      context.transform(scale, 0, 0, -scale, frame.cx * 400 / frame.n, frame.cy * 400 / frame.n);
+      for (const label of layout.labels) {
+        const path2 = label.polygons.map((p) => p.map((r) => r.map(([x2, y], i2) => `${i2 ? "L" : "M"}${x2} ${y}`).join("") + "Z").join("")).join("");
+        context.fill(new Path2D(path2), "evenodd");
+      }
     } else {
-      for (let i2 = 0; i2 < 12; i2++) {
+      if (frame && usesSVGBacking(settings)) {
+        const scale = settings.diameter / (frame.n * frame.scale);
+        context.transform(scale, 0, 0, scale, frame.cx * 400 / frame.n - 200 * scale, frame.cy * 400 / frame.n - 200 * scale);
+      }
+      if (settings.hourStyle !== "ticks") {
+        const svg = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${hourNumeralMarkup(settings)}</svg>`, "image/svg+xml");
+        for (const path2 of svg.querySelectorAll("path")) context.fill(new Path2D(path2.getAttribute("d")), "evenodd");
+      } else for (let i2 = 0; i2 < 12; i2++) {
         context.save();
         context.translate(200, 200);
         context.rotate(i2 * Math.PI / 6);
@@ -6535,42 +6763,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   }
   function designSnapshot() {
     const settings = { ...state, faceColor: colors[state.color][1] };
-    return { settings, geometry: geometryKey(settings), image: customImage, placement: [...artworkOrientation] };
+    return { settings, geometry: geometryKey(settings), image: customImage, placement: [...artworkOrientation], revision: customRevision };
   }
-  async function ensureMesh(snapshot, signal, onStage = () => {
-  }) {
-    const { settings, geometry, image, placement } = snapshot;
-    const result = await meshStore.get(geometry, async (jobSignal, stage) => {
-      jobSignal.throwIfAborted();
-      stage("outline");
-      const n = Math.ceil(settings.diameter / 0.15), canvas = document.createElement("canvas");
-      canvas.width = canvas.height = n;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      ctx.scale(n / 400, n / 400);
-      if (settings.design === "custom") drawPlacedArtwork(ctx, image, placement);
-      else {
-        ctx.fillStyle = "#fff";
-        ctx.fill(new Path2D(outlines.get(settings.design)));
-      }
-      const pixels = ctx.getImageData(0, 0, n, n).data, alpha = new Uint8Array(n * n);
-      for (let i2 = 0; i2 < alpha.length; i2++) alpha[i2] = pixels[i2 * 4 + 3];
-      let artwork = null;
-      if (originalArtwork(settings)) {
-        const frame = artworkFrame(alpha, n, settings.diameter, settings);
-        paintHourDetails(ctx, settings, frame);
-        const png = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-        jobSignal.throwIfAborted();
-        if (!png) throw Error("The SVG color artwork could not be prepared.");
-        artwork = { rgba: pixels, texture: { png: new Uint8Array(await png.arrayBuffer()), frame, thickness: artworkSurfaceHeight(settings) } };
-      }
-      jobSignal.throwIfAborted();
-      const mesh = await meshAsync(alpha, n, { ...settings, exportFormat: "stl" }, jobSignal, null, artwork, stage);
-      return { stlBuffer: mesh.stlBuffer, stats: mesh.stats, artwork: artwork ? { texture: artwork.texture } : null };
-    }, { signal, onStage });
-    updatePrintSummary();
-    return result;
-  }
-  function prepareFilamentRaster(snapshot, mesh) {
+  function sourceRaster(snapshot) {
     const { settings, image, placement } = snapshot, n = Math.ceil(settings.diameter / 0.15), canvas = document.createElement("canvas");
     canvas.width = canvas.height = n;
     const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -6580,21 +6775,81 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       context.fillStyle = "#fff";
       context.fill(new Path2D(outlines.get(settings.design)));
     }
-    const alpha = new Uint8Array(n * n), pixels = context.getImageData(0, 0, n, n).data;
-    for (let i2 = 0; i2 < alpha.length; i2++) alpha[i2] = pixels[i2 * 4 + 3];
-    const frame = mesh?.artwork?.texture.frame || artworkFrame(alpha, n, settings.diameter, settings);
+    const rgba = context.getImageData(0, 0, n, n).data, alpha = new Uint8Array(n * n);
+    for (let i2 = 0; i2 < alpha.length; i2++) alpha[i2] = rgba[i2 * 4 + 3];
+    return { canvas, context, n, rgba, alpha };
+  }
+  function sourceInfo(snapshot, raw = null) {
+    const s = snapshot.settings, key = JSON.stringify([snapshot.revision, snapshot.placement, s.design, s.diameter, s.hole, s.svgBacking, s.svgBackingMargin, s.markers, s.hourStyle, s.numberSize, s.numberPosition, s.hourFit]);
+    if (sourceInfoCache?.key === key) return sourceInfoCache;
+    raw ||= sourceRaster(snapshot);
+    const frame = artworkFrame(raw.alpha, raw.n, s.diameter, s), layout = autoHourFit(s) ? fitHourLayout(raw.alpha, raw.n, frame, s) : null;
+    sourceInfoCache = { key, frame, n: raw.n, layout };
+    return sourceInfoCache;
+  }
+  function paintedRaster(snapshot, raw = null) {
+    const settings = snapshot.settings;
+    raw ||= sourceRaster(snapshot);
+    const { frame: sourceFrame, layout } = sourceInfo(snapshot, raw), n = raw.n, backed = usesSVGBacking(settings);
+    let canvas = raw.canvas, context = raw.context, frame = sourceFrame;
+    if (backed) {
+      canvas = document.createElement("canvas");
+      canvas.width = canvas.height = n;
+      context = canvas.getContext("2d", { willReadFrequently: true });
+      context.scale(n / 400, n / 400);
+      context.save();
+      const scale = sourceFrame.scale * n / settings.diameter;
+      context.transform(scale, 0, 0, scale, 200 - sourceFrame.cx * sourceFrame.scale * 400 / settings.diameter, 200 - sourceFrame.cy * sourceFrame.scale * 400 / settings.diameter);
+      drawPlacedArtwork(context, snapshot.image, snapshot.placement);
+      context.restore();
+      frame = { scale: settings.diameter / n, cx: n / 2, cy: n / 2, n };
+    }
     if (!originalArtwork(settings)) {
       context.globalCompositeOperation = "source-in";
       context.fillStyle = settings.faceColor;
       context.fillRect(0, 0, 400, 400);
     }
-    context.globalCompositeOperation = "source-atop";
-    paintHourDetails(context, settings, frame);
-    return { rgba: context.getImageData(0, 0, n, n).data, width: n, height: n, frame, thickness: artworkSurfaceHeight(settings) };
+    context.globalCompositeOperation = backed && autoHourFit(settings) ? "source-over" : "source-atop";
+    paintHourDetails(context, settings, frame, layout);
+    return { canvas, frame, sourceFrame, n, rgba: context.getImageData(0, 0, n, n).data };
+  }
+  async function ensureMesh(snapshot, signal, onStage = () => {
+  }) {
+    const { settings, geometry } = snapshot;
+    try {
+      const result = await meshStore.get(geometry, async (jobSignal, stage) => {
+        jobSignal.throwIfAborted();
+        stage("outline");
+        const raw = sourceRaster(snapshot);
+        let artwork = null;
+        if (originalArtwork(settings)) {
+          const paint = paintedRaster(snapshot, raw), png = await new Promise((resolve) => paint.canvas.toBlob(resolve, "image/png"));
+          jobSignal.throwIfAborted();
+          if (!png) throw Error("The SVG color artwork could not be prepared.");
+          artwork = { rgba: raw.rgba, texture: { png: new Uint8Array(await png.arrayBuffer()), frame: paint.frame, thickness: artworkSurfaceHeight(settings) } };
+        }
+        jobSignal.throwIfAborted();
+        const mesh = await meshAsync(raw.alpha, raw.n, { ...settings, exportFormat: "stl" }, jobSignal, null, artwork, stage);
+        return { stlBuffer: mesh.stlBuffer, stats: mesh.stats, artwork: artwork ? { texture: artwork.texture } : null };
+      }, { signal, onStage });
+      if (lastGeometryError?.key === geometry) lastGeometryError = null;
+      updatePrintSummary();
+      return result;
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        lastGeometryError = { key: geometry, message: error.message };
+        updatePrintSummary();
+      }
+      throw error;
+    }
+  }
+  function prepareFilamentRaster(snapshot) {
+    const paint = paintedRaster(snapshot);
+    return { rgba: paint.rgba, width: paint.n, height: paint.n, frame: paint.frame, thickness: artworkSurfaceHeight(snapshot.settings) };
   }
   function updateFilamentPreview() {
     const snapshot = designSnapshot(), settings = snapshot.settings;
-    const key = JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgBacking, settings.svgBacking ? settings.svgBackingMargin : null] : null, settings.diameter, settings.faceColor, settings.markers ? [settings.hourStyle, settings.numberSize, settings.numberPosition] : false, settings.filamentCount, settings.bambuBackColor]);
+    const key = JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgBacking, settings.svgBacking ? settings.svgBackingMargin : null, settings.hourFit, settings.markers ? settings.hole : null] : null, settings.diameter, settings.faceColor, settings.markers ? [settings.hourStyle, settings.numberSize, settings.numberPosition] : false, settings.filamentCount, settings.bambuBackColor]);
     filamentPreview.update({ enabled: state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1", busy: importPending || restorePending || deletingArtwork, key, snapshot, overrides: state.bambuColors });
   }
   var stageMessage = (stage) => ({ outline: "Tracing the clock outline…", details: "Adding the printable details…", mesh: "Closing the print mesh…", package: "Preparing your 3MF file…", filaments: "Mapping your SVG colors to printable filaments…" })[stage] || "Checking your model…";
@@ -6607,6 +6862,15 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("printCheckStatus").textContent = stats ? stats.components > 1 ? `${stats.components} separate pieces. Plan a backing or assembly before printing.` : "Closed print mesh checked. Add the movement and hands after printing." : "Check the model to see its exact dimensions, relief, and separate parts.";
     $("printCheckStatus").dataset.tone = stats ? stats.components > 1 ? "warning" : "success" : "neutral";
     $("printCheckStatus").dataset.checked = String(!!stats);
+    const invalidPocket = state.mechanismRecess && ["recessWidth", "recessHeight", "recessDepth", "recessClearance"].some((id) => $(id).value === "" || !$(id).validity.valid);
+    const pocketError = invalidPocket ? "Rear pocket: enter dimensions within the displayed ranges and steps." : state.mechanismRecess && lastGeometryError?.key === key && lastGeometryError.message.startsWith("Rear pocket:") ? lastGeometryError.message : null;
+    $("recessError").hidden = !pocketError;
+    $("recessError").textContent = pocketError || "";
+    $("backingForRecess").hidden = !state.mechanismRecess || state.design !== "custom" || state.svgBacking && state.svgBackingThickness >= state.recessDepth + RECESS_SKIN;
+    if (pocketError) {
+      $("printCheckStatus").textContent = pocketError;
+      $("printCheckStatus").dataset.tone = "warning";
+    }
     const valid = [$("bedWidth"), $("bedDepth")].every((input) => input.value !== "" && input.validity.valid);
     const fit = stats ? bedFit(stats.dimensions, bed.width, bed.depth) : null;
     $("bedLabel").textContent = `${bed.width} × ${bed.depth} mm${valid && fit ? fit.fits ? " · Fits" : " · Too small" : ""}`;
@@ -6694,6 +6958,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   $("connectArtwork").onclick = async () => {
     if (state.design !== "custom" || checkController || importPending || restorePending || deletingArtwork) return;
     state.svgBacking = true;
+    makeRecessRoom();
     render({ forceInputs: true });
     const requested = geometryKey();
     await $("checkModel").onclick();
@@ -6711,6 +6976,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("showHandsRow").hidden = mode === "print";
     $("meshOptions").hidden = mode !== "print";
     $("previewBadge").textContent = mode === "print" ? "Actual print model" : "Design preview";
+    $("backView").hidden = mode !== "print";
+    if (mode === "print") meshCamera(meshCameraView);
+    else {
+      $("backView").classList.remove("selected");
+      view();
+    }
     if (mode === "design") {
       clearTimeout(meshPreviewTimer);
       meshPreviewTimer = null;
@@ -6782,6 +7053,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         }
         await meshView.setModel(result, snapshot.settings, { signal: controller.signal });
         controller.signal.throwIfAborted();
+        meshCamera(meshCameraView);
         if (previewMode !== "print" || key !== geometryKey()) return;
         loadedMeshKey = key;
         $("meshCanvas").dataset.geometryKey = key;

@@ -53,3 +53,10 @@ test('calibrated center holes retain 0.1 mm precision in local settings and port
   assert.equal(normalizeSettings({hole:8}).hole,8);assert.equal(normalizeSettings({hole:8.24}).hole,8.2);
   const invalid=JSON.parse(serializeProject(settings));invalid.settings.hole=8.25;assert.throws(()=>parseProject(JSON.stringify(invalid)),/invalid hole/);
 });
+test('automatic hours and measured rear pockets survive project backups and legacy settings stay readable',()=>{
+  const settings={...DEFAULT_SETTINGS,hourFit:true,mechanismRecess:true,thickness:7,recessWidth:55,recessHeight:55,recessDepth:5.5,recessClearance:.5};
+  assert.deepEqual(parseProject(serializeProject(settings)).settings,settings);
+  const legacy=JSON.parse(serializeProject(settings));for(const key of ['hourFit','mechanismRecess','recessWidth','recessHeight','recessDepth','recessClearance'])delete legacy.settings[key];
+  const restored=parseProject(JSON.stringify(legacy));assert.equal(restored.settings.hourFit,true);assert.equal(restored.settings.mechanismRecess,false);
+  for(const patch of [{hourFit:'true'},{mechanismRecess:1},{recessDepth:20},{recessWidth:120}])assert.throws(()=>parseProject(JSON.stringify({...legacy,settings:{...legacy.settings,...patch}})),/project/);
+});

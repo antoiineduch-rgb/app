@@ -92,7 +92,7 @@ export function extrudeLayers(input) {
   const layers=input.map(layer=>{
     if(!Number.isFinite(layer.height)||layer.height<=previous)throw new RangeError('Layer heights must be positive and increasing.');
     previous=layer.height;
-    return {height:Math.fround(layer.height),polygons:normalize(layer.polygons)};
+    return {height:Math.fround(layer.height),polygons:normalize(layer.polygons),closeUnderside:layer.closeUnderside===true};
   });
   if(!layers[0].polygons.length)throw new RangeError('The clock face has no printable area.');
   const vertices=[],vertexIds=new Map(),xyPoints=new Map(),xyCells=new Map(),triangles=[];
@@ -140,6 +140,7 @@ export function extrudeLayers(input) {
   cap(layers[0].polygons,0,false);
   for(let i=0;i<layers.length;i++) {
     const {polygons,height}=layers[i],low=i?layers[i-1].height:0,next=layers[i+1]?.polygons;
+    if(i&&layers[i].closeUnderside)cap(normalize(polygonClipping.difference(polygons,layers[i-1].polygons)),low,false);
     const exposed=next?.length?normalize(polygonClipping.difference(polygons,next)):polygons;
     cap(exposed,height,true);
     for(const polygon of polygons)for(const ring of polygon)for(let j=0;j<ring.length;j++) {

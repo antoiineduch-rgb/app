@@ -74,7 +74,7 @@ export class PrintView{
   setBed(width,depth,fits=true,visible=this.plateVisible){
     this.plateVisible=visible;
     const key=[width,depth,fits].join(',');
-    if(key===this.bedKey&&this.bed){for(const object of this.bed)object.visible=visible;this.render();return;}
+    if(key===this.bedKey&&this.bed){for(const object of this.bed)object.visible=visible&&this.viewMode!=='back';this.render();return;}
     this.bedKey=key;
     for(const object of this.bed||[]){this.scene.remove(object);object.geometry.dispose();object.material.dispose();}
     const points=[];
@@ -83,12 +83,13 @@ export class PrintView{
     const geometry=new BufferGeometry();geometry.setAttribute('position',new BufferAttribute(new Float32Array(points),3));
     const grid=new LineSegments(geometry,new LineBasicMaterial({color:fits?'#d3d8cb':'#d9b6a6'}));
     const plane=new Mesh(new PlaneGeometry(width,depth),new MeshStandardMaterial({color:fits?'#e7eadf':'#eee1d8',roughness:1,metalness:0,side:DoubleSide}));plane.position.z=-.4;plane.receiveShadow=true;
-    this.bed=[plane,grid];for(const object of this.bed){object.visible=visible;this.scene.add(object);}this.render();
+    this.bed=[plane,grid];for(const object of this.bed){object.visible=visible&&this.viewMode!=='back';this.scene.add(object);}this.render();
   }
   setView(view){
+    this.viewMode=view;for(const object of this.bed||[])object.visible=this.plateVisible&&view!=='back';
     const distance=(this.span||200)*1.65;
     this.controls.target.set(0,0,0);
-    this.camera.position.copy(view==='front'?new Vector3(0,-.001,distance):view==='back'?new Vector3(0,-.001,-distance):new Vector3(distance*.22,-distance*.65,distance*.82));
+    this.camera.position.copy(view==='front'?new Vector3(0,-.001,distance):view==='back'?new Vector3(distance*.15,-distance*.45,-distance*.9):new Vector3(distance*.22,-distance*.65,distance*.82));
     this.controls.update();this.render();
   }
   zoom(factor){const offset=this.camera.position.clone().sub(this.controls.target);offset.setLength(Math.max(this.controls.minDistance,Math.min(this.controls.maxDistance,offset.length()*factor)));this.camera.position.copy(this.controls.target).add(offset);this.controls.update();this.render();}

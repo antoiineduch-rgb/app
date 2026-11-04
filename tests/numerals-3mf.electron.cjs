@@ -235,10 +235,11 @@ async function run(window) {
     data.items.add(new File(['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path d="M20 20H90V75H180V180H20Z"/></svg>'],'numbered-clock.svg',{type:'image/svg+xml'}));
     input.files=data.files;await input.onchange({target:input});
   });
+  await evaluate(()=>{const input=document.getElementById('hourFit');input.checked=false;input.dispatchEvent(new Event('input',{bubbles:true}));});
   const upright=await evaluate(()=>document.getElementById('hourNumerals').innerHTML);
   await click('artRotateRight');
   assert.equal(await evaluate(()=>document.getElementById('hourNumerals').innerHTML),upright,'rotating imported SVG does not rotate the clock numbers');
-  console.log('PASS imported SVG orientation leaves hour numerals upright');
+  console.log('PASS manual hour placement remains fixed when imported SVG artwork rotates');
 
   const nativePath=join(profile,'native-clock.3mf');
   const native=new Promise((resolve,reject)=>{

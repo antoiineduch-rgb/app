@@ -2095,7 +2095,7 @@
   });
 
   // mesh.js
-  var import_polygon_clipping3 = __toESM(require_polygon_clipping_umd(), 1);
+  var import_polygon_clipping5 = __toESM(require_polygon_clipping_umd(), 1);
 
   // contours.js
   var CONTOUR_SEGMENTS = [
@@ -2162,9 +2162,9 @@
     return rings;
   }
   function contourArea(ring) {
-    let area3 = 0;
-    for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) area3 += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
-    return area3 / 2;
+    let area4 = 0;
+    for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) area4 += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
+    return area4 / 2;
   }
   function pointSegmentDistanceSquared(point, a, b) {
     const dx = b[0] - a[0], dy = b[1] - a[1];
@@ -2826,7 +2826,7 @@
     const layers = input.map((layer) => {
       if (!Number.isFinite(layer.height) || layer.height <= previous) throw new RangeError("Layer heights must be positive and increasing.");
       previous = layer.height;
-      return { height: Math.fround(layer.height), polygons: normalize(layer.polygons) };
+      return { height: Math.fround(layer.height), polygons: normalize(layer.polygons), closeUnderside: layer.closeUnderside === true };
     });
     if (!layers[0].polygons.length) throw new RangeError("The clock face has no printable area.");
     const vertices = [], vertexIds = /* @__PURE__ */ new Map(), xyPoints = /* @__PURE__ */ new Map(), xyCells = /* @__PURE__ */ new Map(), triangles = [];
@@ -2887,6 +2887,7 @@
     cap(layers[0].polygons, 0, false);
     for (let i2 = 0; i2 < layers.length; i2++) {
       const { polygons, height } = layers[i2], low = i2 ? layers[i2 - 1].height : 0, next = layers[i2 + 1]?.polygons;
+      if (i2 && layers[i2].closeUnderside) cap(normalize(import_polygon_clipping.default.difference(polygons, layers[i2 - 1].polygons)), low, false);
       const exposed = next?.length ? normalize(import_polygon_clipping.default.difference(polygons, next)) : polygons;
       cap(exposed, height, true);
       for (const polygon of polygons) for (const ring of polygon) for (let j = 0; j < ring.length; j++) {
@@ -3116,7 +3117,7 @@
   function backingDepth(settings) {
     if (!usesSVGBacking(settings)) return 0;
     const value = settings.svgBackingThickness ?? 1.2;
-    if (!Number.isFinite(value) || value < 1 || value > 3) throw Error("Choose a backing thickness from 1 to 3 mm.");
+    if (!Number.isFinite(value) || value < 1 || value > 10) throw Error("Choose a backing thickness from 1 to 10 mm.");
     return value;
   }
   function artworkSurfaceHeight(settings) {
@@ -3207,10 +3208,147 @@
     return relief;
   }
 
+  // hour-layout.js
+  var import_polygon_clipping3 = __toESM(require_polygon_clipping_umd(), 1);
+  var snap2 = (value) => Math.round(value * 1e6) / 1e6;
+  var autoHourFit = (settings) => settings.design === "custom" && settings.hourFit === true && settings.markers;
+  function tickLabels(settings, padding = 0) {
+    const result = [], d = settings.diameter;
+    for (let hour = 1; hour <= 12; hour++) {
+      const length = d * (hour % 3 === 0 ? 17 : 10) / 400, w = d * 5 / 400 + padding * 2, h = length + padding * 2, r = Math.min(w * 0.35, h * 0.15), radius = d * 0.31 - length / 2, angle = hour * Math.PI / 6, s = Math.sin(angle), c = Math.cos(angle), x2 = s * radius, y = c * radius, ring = [];
+      for (const [cx, cy, start] of [[w / 2 - r, h / 2 - r, 0], [-w / 2 + r, h / 2 - r, 90], [-w / 2 + r, -h / 2 + r, 180], [w / 2 - r, -h / 2 + r, 270]]) for (let j = 0; j <= 5; j++) {
+        const a = (start + j * 18) * Math.PI / 180, px = cx + r * Math.cos(a), py = cy + r * Math.sin(a);
+        ring.push([snap2(x2 + px * c + py * s), snap2(y - px * s + py * c)]);
+      }
+      ring.push(ring[0]);
+      result.push({ hour, text: String(hour), x: x2, y, height: h, polygons: [[ring]] });
+    }
+    return result;
+  }
+  var sourceLabels = (settings, padding = 0) => ["arabic", "roman"].includes(settings.hourStyle) ? hourNumeralLabels(settings, padding) : tickLabels(settings, padding);
+  var bounds = (polygons) => {
+    const b = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const polygon of polygons) for (const ring of polygon) for (const [x2, y] of ring) {
+      b[0] = Math.min(b[0], x2);
+      b[1] = Math.min(b[1], y);
+      b[2] = Math.max(b[2], x2);
+      b[3] = Math.max(b[3], y);
+    }
+    return b;
+  };
+  function footprint(alpha, n, frame, settings) {
+    if (usesSVGBacking(settings)) return (b) => Math.max(...[[b[0], b[1]], [b[0], b[3]], [b[2], b[1]], [b[2], b[3]]].map(([x2, y]) => Math.hypot(x2, y))) <= settings.diameter / 2 - 0.6;
+    const stride = n + 1, invalid = new Uint32Array(stride * stride);
+    for (let y = 0; y < n; y++) {
+      let row = 0;
+      for (let x2 = 0; x2 < n; x2++) {
+        row += alpha[y * n + x2] < 128 ? 1 : 0;
+        invalid[(y + 1) * stride + x2 + 1] = invalid[y * stride + x2 + 1] + row;
+      }
+    }
+    return (b) => {
+      const x0 = Math.floor(b[0] / frame.scale + frame.cx), x1 = Math.ceil(b[2] / frame.scale + frame.cx), y0 = Math.floor(frame.cy - b[3] / frame.scale), y1 = Math.ceil(frame.cy - b[1] / frame.scale);
+      if (x0 < 0 || y0 < 0 || x1 >= n || y1 >= n) return false;
+      return invalid[(y1 + 1) * stride + x1 + 1] - invalid[y0 * stride + x1 + 1] - invalid[(y1 + 1) * stride + x0] + invalid[y0 * stride + x0] === 0;
+    };
+  }
+  function fitHourLayout(alpha, n, frame, settings) {
+    const originals = sourceLabels(settings);
+    if (!settings.markers) return { labels: [], missing: [], scale: 1 };
+    if (!autoHourFit(settings)) return { labels: originals.map((label) => ({ ...label, scale: 1 })), missing: [], scale: 1 };
+    const inside = footprint(alpha, n, frame, settings), clearance = 0.6, step = Math.max(0.4, settings.diameter / 350), maxRadius = settings.diameter * 0.8;
+    const minimum = settings.hourStyle === "ticks" ? Math.min(1, 0.6 / (settings.diameter * 5 / 400)) : Math.min(1, 4.2 / (originals[0]?.height || 4.2));
+    const limits = originals.map((label) => {
+      const b = bounds(label.polygons);
+      return { label, b: [b[0] - label.x, b[1] - label.y, b[2] - label.x, b[3] - label.y] };
+    });
+    let best = { labels: [], missing: originals.map((l) => l.hour), scale: 1 };
+    for (let scale = 1; ; scale = Math.max(minimum, scale * 0.9)) {
+      const options = limits.map(({ label, b }) => {
+        const angle = label.hour * Math.PI / 6, s = Math.sin(angle), c = Math.cos(angle), preferred = Math.hypot(label.x, label.y), radii = [preferred];
+        for (let r = step; r <= maxRadius; r += step) {
+          if (preferred - r > 0) radii.push(preferred - r);
+          if (preferred + r <= maxRadius) radii.push(preferred + r);
+        }
+        const candidates = [];
+        for (const radius of radii) {
+          const x2 = s * radius, y = c * radius, box = [x2 + b[0] * scale - clearance, y + b[1] * scale - clearance, x2 + b[2] * scale + clearance, y + b[3] * scale + clearance];
+          const nearX = box[0] <= 0 && box[2] >= 0 ? 0 : Math.min(Math.abs(box[0]), Math.abs(box[2])), nearY = box[1] <= 0 && box[3] >= 0 ? 0 : Math.min(Math.abs(box[1]), Math.abs(box[3]));
+          if (Math.hypot(nearX, nearY) > settings.hole / 2 + 0.6 && inside(box)) candidates.push({ x: x2, y, box });
+        }
+        return { label, candidates };
+      }).sort((a, b) => a.candidates.length - b.candidates.length || a.label.hour - b.label.hour);
+      const placed = [];
+      for (const { label, candidates } of options) {
+        const candidate = candidates.find(({ box: a }) => placed.every(({ box: b }) => a[2] + 0.3 < b[0] || b[2] + 0.3 < a[0] || a[3] + 0.3 < b[1] || b[3] + 0.3 < a[1]));
+        if (candidate) {
+          const { x: x2, y, box } = candidate, polygons = label.polygons.map((p) => p.map((r) => r.map(([px, py]) => [snap2(x2 + (px - label.x) * scale), snap2(y + (py - label.y) * scale)])));
+          placed.push({ ...label, x: snap2(x2), y: snap2(y), scale, box, polygons });
+        }
+      }
+      if (placed.length > best.labels.length) best = { labels: placed.sort((a, b) => a.hour - b.hour), missing: originals.filter((l) => !placed.some((p) => p.hour === l.hour)).map((l) => l.hour), scale };
+      if (placed.length === 12 || scale === minimum) return best;
+    }
+  }
+  function fittedHourPolygons(settings, layout, padding = 0) {
+    if (!layout.labels.length) return [];
+    if (!padding) return import_polygon_clipping3.default.union(...layout.labels.map((label) => label.polygons));
+    const originals = sourceLabels(settings, padding / layout.scale);
+    return import_polygon_clipping3.default.union(...layout.labels.map((placed) => {
+      const original = originals.find((label) => label.hour === placed.hour);
+      return original.polygons.map((p) => p.map((r) => r.map(([x2, y]) => [snap2(placed.x + (x2 - original.x) * placed.scale), snap2(placed.y + (y - original.y) * placed.scale)])));
+    }));
+  }
+
+  // mechanism-recess.js
+  var import_polygon_clipping4 = __toESM(require_polygon_clipping_umd(), 1);
+  var RECESS_SKIN = 1.2;
+  var snap3 = (x2) => Math.round(x2 * 1e6) / 1e6;
+  function recessDimensions(settings) {
+    const width = settings.recessWidth ?? 55, height = settings.recessHeight ?? 55, depth = settings.recessDepth ?? 5.5, clearance = settings.recessClearance ?? 0.5;
+    if (![width, height, depth, clearance].every(Number.isFinite) || width < 5 || width > 90 || height < 5 || height > 90 || depth < 0.5 || depth > 8 || clearance < 0 || clearance > 2) throw Error("Rear pocket: choose valid movement dimensions, 0.5–8 mm depth, and 0–2 mm clearance.");
+    return { width: width + clearance * 2, height: height + clearance * 2, depth, clearance };
+  }
+  function rectangle(width, height, radius) {
+    if (!radius) return [[[-width / 2, -height / 2], [width / 2, -height / 2], [width / 2, height / 2], [-width / 2, height / 2], [-width / 2, -height / 2]]];
+    const points = [];
+    for (const [x2, y, start] of [[width / 2 - radius, height / 2 - radius, 0], [-width / 2 + radius, height / 2 - radius, 90], [-width / 2 + radius, -height / 2 + radius, 180], [width / 2 - radius, -height / 2 + radius, 270]]) for (let i2 = 0; i2 <= 12; i2++) {
+      const a = (start + i2 * 90 / 12) * Math.PI / 180;
+      points.push([snap3(x2 + radius * Math.cos(a)), snap3(y + radius * Math.sin(a))]);
+    }
+    points.push(points[0]);
+    return [points];
+  }
+  var area2 = (polygons) => polygons.reduce((sum, p) => sum + p.reduce((part, r, i2) => {
+    let a = 0;
+    for (let j = 0; j < r.length - 1; j++) a += r[j][0] * r[j + 1][1] - r[j + 1][0] * r[j][1];
+    return part + (i2 ? -1 : 1) * Math.abs(a / 2);
+  }, 0), 0);
+  function withMechanismRecess(layers, settings, shaft) {
+    if (!settings.mechanismRecess) return layers;
+    const { width, height, depth, clearance } = recessDimensions(settings), roof = depth + RECESS_SKIN;
+    if (roof > artworkSurfaceHeight(settings) + 1e-6) throw Error(`Rear pocket: leave at least ${RECESS_SKIN} mm of material in front. Increase face/backing thickness to at least ${Number(roof.toFixed(1))} mm or reduce pocket depth.`);
+    const support = layers.find((layer) => layer.height >= roof - 1e-6)?.polygons;
+    const filled = support?.length ? import_polygon_clipping4.default.union(support, [[shaft]]) : [];
+    const required = [rectangle(width + RECESS_SKIN * 2, height + RECESS_SKIN * 2, 0)];
+    if (!filled.length || area2(import_polygon_clipping4.default.difference(required, filled)) > 1e-5) throw Error("Rear pocket: the movement does not fit inside solid material at this depth. Add a thick round backing, reduce the pocket size, or use a shallower recess.");
+    const pocket = [rectangle(width, height, Math.min(1, clearance * 2))], result = [];
+    let low = 0;
+    for (const layer of layers) {
+      if (layer.height <= depth + 1e-7) result.push({ ...layer, polygons: import_polygon_clipping4.default.difference(layer.polygons, pocket) });
+      else if (low < depth - 1e-7) {
+        result.push({ height: depth, polygons: import_polygon_clipping4.default.difference(layer.polygons, pocket) });
+        result.push({ ...layer, closeUnderside: true });
+      } else result.push({ ...layer, ...Math.abs(low - depth) < 1e-7 ? { closeUnderside: true } : {} });
+      low = layer.height;
+    }
+    return result;
+  }
+
   // mesh.js
   var CURVE_ERROR = 0.02;
-  var snap2 = (value) => Math.round(value * 1e6) / 1e6;
-  function area2(ring) {
+  var snap4 = (value) => Math.round(value * 1e6) / 1e6;
+  function area3(ring) {
     let sum = 0;
     for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) sum += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
     return sum / 2;
@@ -3224,8 +3362,8 @@
     return inside;
   }
   function closed(ring, positive = true) {
-    if (area2(ring) > 0 !== positive) ring.reverse();
-    const points = ring.map(([x2, y]) => [snap2(x2), snap2(y)]);
+    if (area3(ring) > 0 !== positive) ring.reverse();
+    const points = ring.map(([x2, y]) => [snap4(x2), snap4(y)]);
     return [...points, points[0]];
   }
   function silhouette(alpha, n, diameter, frame = null, threshold = 127.5) {
@@ -3246,7 +3384,7 @@
     frame ||= { scale: diameter / span, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
     const { scale, cx, cy } = frame;
     if (!Number.isFinite(scale) || span <= 0) throw Error("The SVG outline could not be measured.");
-    const rings = source.map((ring) => simplifyRing(ring, CURVE_ERROR / scale).map(([x2, y]) => [(x2 - cx) * scale, (cy - y) * scale])).filter((ring) => ring.length >= 3 && Math.abs(area2(ring)) > 1e-6).map((ring) => ({ ring, size: Math.abs(area2(ring)), depth: 0, parent: null, polygon: null })).sort((a, b) => b.size - a.size);
+    const rings = source.map((ring) => simplifyRing(ring, CURVE_ERROR / scale).map(([x2, y]) => [(x2 - cx) * scale, (cy - y) * scale])).filter((ring) => ring.length >= 3 && Math.abs(area3(ring)) > 1e-6).map((ring) => ({ ring, size: Math.abs(area3(ring)), depth: 0, parent: null, polygon: null })).sort((a, b) => b.size - a.size);
     const result = [];
     for (let i2 = 0; i2 < rings.length; i2++) {
       const entry = rings[i2];
@@ -3281,7 +3419,7 @@
     const count = Math.ceil(Math.max(minimum, Math.ceil(Math.PI / Math.acos(Math.max(-1, 1 - error / radius)))) / 4) * 4;
     return Array.from({ length: count + 1 }, (_, i2) => {
       const a = i2 % count / count * Math.PI * 2;
-      return [snap2(radius * Math.cos(a)), snap2(radius * Math.sin(a))];
+      return [snap4(radius * Math.cos(a)), snap4(radius * Math.sin(a))];
     });
   }
   function shaftOpening(diameter) {
@@ -3321,7 +3459,7 @@
         strips.push([closed(ring)]);
       }
     }
-    return import_polygon_clipping3.default.union(...strips);
+    return import_polygon_clipping5.default.union(...strips);
   }
   function buildClockLayers(alpha, n, settings, progress = () => {
   }, artwork = null) {
@@ -3330,23 +3468,27 @@
     if (![diameter, settings.thickness, thickness, hole].every((value) => Number.isFinite(value) && value > 0) || !["smooth", "ripple", "grain"].includes(texture)) throw Error("The clock dimensions or texture are invalid.");
     progress("outline");
     const { polygons: outline, frame } = silhouette(alpha, n, diameter, backed ? artworkFrame(alpha, n, diameter, settings) : null);
-    const opening = shaftOpening(hole), base = import_polygon_clipping3.default.difference(outline, [[opening]]);
+    const opening = shaftOpening(hole), automatic = autoHourFit(settings), layout = automatic ? fitHourLayout(alpha, n, frame, settings) : null, fitted = automatic ? fittedHourPolygons(settings, layout) : [];
+    if (automatic && layout.missing.length) throw Error("Some hours cannot fit inside this SVG as complete labels. Add a round backing for all 12 hours, reduce the number size, or choose manual placement.");
+    let base = import_polygon_clipping5.default.difference(outline, [[opening]]);
     if (!base.length) throw Error("The center opening covers the entire clock face.");
+    if (backed && fitted.length) base = import_polygon_clipping5.default.union(base, fitted);
     const layers = backed ? [
-      { height: backingDepth(settings), polygons: import_polygon_clipping3.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
+      { height: backingDepth(settings), polygons: import_polygon_clipping5.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
       { height: thickness, polygons: base }
     ] : [{ height: thickness, polygons: base }];
     progress("details");
     const detailed = !!artwork?.rgba && settings.design === "custom" && settings.svgDetail !== "silhouette";
-    if (texture === "smooth" && !markers && !detailed) return layers;
+    const finish = () => withMechanismRecess(layers, settings, opening);
+    if (texture === "smooth" && !markers && !detailed) return finish();
     const rimPixels = Math.max(1, Math.ceil(0.3 / frame.scale));
     const detailOutline = silhouette(insetAlpha(alpha, n, rimPixels), n, diameter, frame).polygons;
-    const detailRegion = detailOutline.length ? import_polygon_clipping3.default.difference(detailOutline, [[circle(hole / 2 + 0.3, 1e-3, 128)]]) : [];
+    const detailRegion = detailOutline.length ? import_polygon_clipping5.default.difference(detailOutline, [[circle(hole / 2 + 0.3, 1e-3, 128)]]) : [];
     const useNumerals = ["arabic", "roman"].includes(settings.hourStyle);
     const markerShapes = markers ? useNumerals ? hourNumeralPolygons(settings) : markerPolygons(diameter) : [];
-    const markerOutline = markers ? silhouette(insetAlpha(alpha, n, rimPixels + 1), n, diameter, frame).polygons : [];
-    const markerRegion = markerOutline.length ? import_polygon_clipping3.default.difference(markerOutline, [[circle(hole / 2 + 0.3 + frame.scale, 1e-3, 128)]]) : [];
-    const ticks = markers && markerRegion.length ? import_polygon_clipping3.default.intersection(markerRegion, markerShapes) : [];
+    const markerOutline = markers && !automatic ? silhouette(insetAlpha(alpha, n, rimPixels + 1), n, diameter, frame).polygons : [];
+    const markerRegion = markerOutline.length ? import_polygon_clipping5.default.difference(markerOutline, [[circle(hole / 2 + 0.3 + frame.scale, 1e-3, 128)]]) : [];
+    const ticks = automatic ? fitted : markers && markerRegion.length ? import_polygon_clipping5.default.intersection(markerRegion, markerShapes) : [];
     if (detailed) {
       const height = settings.svgRelief ?? 0.8;
       if (!Number.isFinite(height) || height < 0 || height > 2) throw Error("SVG relief must be between 0 and 2 mm.");
@@ -3356,9 +3498,9 @@
         const steps = Math.max(1, Math.min(8, Math.round(height / 0.2)));
         for (let level = 1; level <= steps; level++) {
           const region = silhouette(relief, n, diameter, frame, (level - 0.5) * 255 / steps).polygons;
-          const detail = region.length && previous.length ? import_polygon_clipping3.default.intersection(previous, region) : [];
+          const detail = region.length && previous.length ? import_polygon_clipping5.default.intersection(previous, region) : [];
           previous = detail;
-          const raised = ticks.length ? detail.length ? import_polygon_clipping3.default.union(detail, ticks) : ticks : detail;
+          const raised = ticks.length ? detail.length ? import_polygon_clipping5.default.union(detail, ticks) : ticks : detail;
           if (raised.length) {
             top = thickness + height * level / steps;
             layers.push({ height: top, polygons: raised });
@@ -3366,23 +3508,24 @@
         }
       }
       if (ticks.length) layers.push({ height: top + 0.8, polygons: ticks });
-      return layers;
+      return finish();
     }
     if (texture !== "smooth") {
       let pattern = texture === "ripple" ? ripplePolygons(diameter) : hatchPolygons(diameter);
       let first = [];
       if (useNumerals && markers) {
-        pattern = import_polygon_clipping3.default.difference(pattern, hourNumeralPolygons(settings, 0.6));
-        const textureArea = detailRegion.length ? import_polygon_clipping3.default.intersection(detailRegion, pattern) : [];
-        first = textureArea.length && ticks.length ? import_polygon_clipping3.default.union(textureArea, ticks) : ticks.length ? ticks : textureArea;
+        pattern = import_polygon_clipping5.default.difference(pattern, automatic ? fittedHourPolygons(settings, layout, 0.6) : hourNumeralPolygons(settings, 0.6));
+        const textureArea = detailRegion.length ? import_polygon_clipping5.default.intersection(detailRegion, pattern) : [];
+        first = textureArea.length && ticks.length ? import_polygon_clipping5.default.union(textureArea, ticks) : ticks.length ? ticks : textureArea;
       } else {
-        const foundation = markers ? import_polygon_clipping3.default.union(pattern, markerPolygons(diameter, 0.15)) : pattern;
-        first = detailRegion.length ? import_polygon_clipping3.default.intersection(detailRegion, foundation) : [];
+        const foundation = markers ? import_polygon_clipping5.default.union(pattern, markerPolygons(diameter, 0.15)) : pattern;
+        first = detailRegion.length ? import_polygon_clipping5.default.intersection(detailRegion, foundation) : [];
       }
+      if (automatic && ticks.length) first = first.length ? import_polygon_clipping5.default.union(first, ticks) : ticks;
       if (first.length) layers.push({ height: thickness + 0.4, polygons: first });
     }
     if (ticks.length) layers.push({ height: thickness + 0.8, polygons: ticks });
-    return layers;
+    return finish();
   }
   function makeClockSTL(alpha, n, settings, progress = () => {
   }, artwork = null) {
@@ -4436,13 +4579,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     function split(vertices, depth) {
       if (++budget.nodes > 2e6) throw Error("The SVG color map is too complex. Choose fewer filaments or simplify its smallest details.");
       const centroid = [0, 1].map((k) => (vertices[0][k] + vertices[1][k] + vertices[2][k]) / 3), color = sample(...centroid);
-      const bounds = [0, 1].map((k) => [Math.floor(Math.min(...vertices.map((p) => p[k]))), Math.floor(Math.max(...vertices.map((p) => p[k])))]);
+      const bounds2 = [0, 1].map((k) => [Math.floor(Math.min(...vertices.map((p) => p[k]))), Math.floor(Math.max(...vertices.map((p) => p[k])))]);
       const lengths = vertices.map((a2, i2) => {
         const b2 = vertices[(i2 + 1) % 3];
         return (a2[0] - b2[0]) ** 2 + (a2[1] - b2[1]) ** 2;
       });
       const longest = Math.max(...lengths);
-      if (longest <= tolerance * tolerance || depth >= 20 || uniformRectangle(paint, bounds[0][0], bounds[1][0], bounds[0][1], bounds[1][1], 1 << color)) return { code: filamentCode(color), color };
+      if (longest <= tolerance * tolerance || depth >= 20 || uniformRectangle(paint, bounds2[0][0], bounds2[1][0], bounds2[0][1], bounds2[1][1], 1 << color)) return { code: filamentCode(color), color };
       const special = (lengths.indexOf(longest) + 2) % 3, [a, b, c] = [0, 1, 2].map((i2) => vertices[(special + i2) % 3]), middle = midpoint(b, c);
       const left = split([a, b, middle], depth + 1), right = split([middle, c, a], depth + 1);
       if (left.color >= 0 && left.color === right.color) return left;
@@ -4492,7 +4635,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   }
 
   // hole-fit.js
-  var import_polygon_clipping4 = __toESM(require_polygon_clipping_umd(), 1);
+  var import_polygon_clipping6 = __toESM(require_polygon_clipping_umd(), 1);
   var round = (value) => Math.round(value * 1e6) / 1e6;
   var DIGITS = ["abcdef", "bc", "abdeg", "abcdg", "bcfg", "acdfg", "acdefg", "abc", "abcdefg", "abcdfg"];
   var SEGMENTS = { a: [0.25, 3.6, 2.25, 4.2], b: [1.9, 1.9, 2.5, 4], c: [1.9, 0.2, 2.5, 2.3], d: [0.25, 0, 2.25, 0.6], e: [0, 0.2, 0.6, 2.3], f: [0, 1.9, 0.6, 4], g: [0.25, 1.8, 2.25, 2.4] };
@@ -4507,7 +4650,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       offset += (char === "." ? 0.7 : 2.5) + 0.8;
     }
-    return import_polygon_clipping4.default.union(...rectangles);
+    return import_polygon_clipping6.default.union(...rectangles);
   }
   function roundedRectangle(width, height) {
     const radius = 3, ring = [];
@@ -4523,12 +4666,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const sizes = Array.from({ length: 5 }, (_, i2) => (first + i2 * 2) / 10), largest = sizes.at(-1), cell = largest + 6, width = round(cell * 5 + 8), depth = round(largest + 14), thickness = 2, relief = 0.6;
     const holes = sizes.map((diameter, i2) => ({ diameter, x: round(-width / 2 + 4 + cell * (i2 + 0.5)), y: 3.5 }));
     const outline = roundedRectangle(width, depth), openings = holes.map(({ diameter, x: x2, y }) => [shaftOpening(diameter).map(([px, py]) => [round(px + x2), round(py + y)])]);
-    const base = import_polygon_clipping4.default.difference([[outline]], ...openings);
+    const base = import_polygon_clipping6.default.difference([[outline]], ...openings);
     const labels = holes.map(({ diameter, x: x2 }) => ({ text: diameter.toFixed(1), polygons: labelPolygons(diameter.toFixed(1), x2, -depth / 2 + 4) }));
     return { center, sizes, width, depth, thickness, relief, holes, base, labels };
   }
   function makeFitTestSTL(center) {
-    const plan = fitTestPlan(center), letters = import_polygon_clipping4.default.union(...plan.labels.map((label) => label.polygons));
+    const plan = fitTestPlan(center), letters = import_polygon_clipping6.default.union(...plan.labels.map((label) => label.polygons));
     return extrudeLayers([{ height: plan.thickness, polygons: plan.base }, { height: plan.thickness + plan.relief, polygons: letters }]);
   }
 

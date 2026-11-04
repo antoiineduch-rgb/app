@@ -1,13 +1,13 @@
 {
   "name": "clock-factory",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.js",
     "dev": "node build.js && node server.js",
     "start": "node build.js && node server.js",
-    "test": "node --test geometry.test.js hour-numerals.test.js hour-mesh.test.js export-3mf.test.js export-bambu.test.js svg-details.test.js svg-placement.test.js contours.test.js mesh-extrusion.test.js mesh-quality.test.js project.test.js history.test.js mesh-analysis.test.js mesh-store.test.js hole-fit.test.js server.test.js desktop/assets.test.cjs",
+    "test": "node --test geometry.test.js hour-numerals.test.js hour-mesh.test.js hour-recess.test.js export-3mf.test.js export-bambu.test.js svg-details.test.js svg-placement.test.js contours.test.js mesh-extrusion.test.js mesh-quality.test.js project.test.js history.test.js mesh-analysis.test.js mesh-store.test.js hole-fit.test.js server.test.js desktop/assets.test.cjs",
     "desktop": "npm run build && electron .",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "dist:win:portable": "npm run build && electron-builder --win portable --x64 --publish never",
@@ -18,7 +18,8 @@
     "test:studio": "npm run build && electron tests/studio.electron.cjs",
     "test:bambu": "npm run build && electron tests/bambu-export.electron.cjs",
     "test:svg-backing": "npm run build && electron tests/svg-backing.electron.cjs",
-    "test:hole-fit": "npm run build && electron tests/hole-fit.electron.cjs"
+    "test:hole-fit": "npm run build && electron tests/hole-fit.electron.cjs",
+    "test:hours-recess": "npm run build && electron tests/hour-recess.electron.cjs"
   },
   "engines": {
     "node": ">=22.12.0"

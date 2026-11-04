@@ -3,6 +3,8 @@ import { traceContours, simplifyRing } from './contours.js';
 import { extrudeLayers } from './mesh-extrusion.js';
 import { hourNumeralPolygons } from './hour-numerals.js';
 import { artworkRelief,artworkFrame,usesSVGBacking,backingDepth,artworkSurfaceHeight } from './svg-details.js';
+import {autoHourFit,fitHourLayout,fittedHourPolygons} from './hour-layout.js';
+import {withMechanismRecess} from './mechanism-recess.js';
 
 const CURVE_ERROR = .02;
 const snap = value => Math.round(value*1e6)/1e6;
@@ -114,23 +116,27 @@ export function buildClockLayers(alpha,n,settings,progress=()=>{},artwork=null) 
   const {polygons:outline,frame}=silhouette(alpha,n,diameter,backed?artworkFrame(alpha,n,diameter,settings):null);
   // An analytic 128+ segment shaft circle maintains the requested fit without
   // stair-stepping or smoothing the hole into an undersized opening.
-  const opening=shaftOpening(hole),base=clipping.difference(outline,[[opening]]);
+  const opening=shaftOpening(hole),automatic=autoHourFit(settings),layout=automatic?fitHourLayout(alpha,n,frame,settings):null,fitted=automatic?fittedHourPolygons(settings,layout):[];
+  if(automatic&&layout.missing.length)throw Error('Some hours cannot fit inside this SVG as complete labels. Add a round backing for all 12 hours, reduce the number size, or choose manual placement.');
+  let base=clipping.difference(outline,[[opening]]);
   if(!base.length)throw Error('The center opening covers the entire clock face.');
+  if(backed&&fitted.length)base=clipping.union(base,fitted);
   const layers=backed?[
     {height:backingDepth(settings),polygons:clipping.difference([[circle(diameter/2,CURVE_ERROR,128)]],[[opening]])},
     {height:thickness,polygons:base}
   ]:[{height:thickness,polygons:base}];
   progress('details');
   const detailed=!!artwork?.rgba&&settings.design==='custom'&&settings.svgDetail!=='silhouette';
-  if(texture==='smooth'&&!markers&&!detailed)return layers;
+  const finish=()=>withMechanismRecess(layers,settings,opening);
+  if(texture==='smooth'&&!markers&&!detailed)return finish();
   const rimPixels=Math.max(1,Math.ceil(.3/frame.scale));
   const detailOutline=silhouette(insetAlpha(alpha,n,rimPixels),n,diameter,frame).polygons;
   const detailRegion=detailOutline.length?clipping.difference(detailOutline,[[circle(hole/2+.3,.001,128)]]):[];
   const useNumerals=['arabic','roman'].includes(settings.hourStyle);
   const markerShapes=markers?(useNumerals?hourNumeralPolygons(settings):markerPolygons(diameter)):[];
-  const markerOutline=markers?silhouette(insetAlpha(alpha,n,rimPixels+1),n,diameter,frame).polygons:[];
+  const markerOutline=markers&&!automatic?silhouette(insetAlpha(alpha,n,rimPixels+1),n,diameter,frame).polygons:[];
   const markerRegion=markerOutline.length?clipping.difference(markerOutline,[[circle(hole/2+.3+frame.scale,.001,128)]]):[];
-  const ticks=markers&&markerRegion.length?clipping.intersection(markerRegion,markerShapes):[];
+  const ticks=automatic?fitted:markers&&markerRegion.length?clipping.intersection(markerRegion,markerShapes):[];
   if(detailed){
     const height=settings.svgRelief??.8;
     if(!Number.isFinite(height)||height<0||height>2)throw Error('SVG relief must be between 0 and 2 mm.');
@@ -149,7 +155,7 @@ export function buildClockLayers(alpha,n,settings,progress=()=>{},artwork=null) 
       }
     }
     if(ticks.length)layers.push({height:top+.8,polygons:ticks});
-    return layers;
+    return finish();
   }
   if(texture!=='smooth'){
     let pattern=texture==='ripple'?ripplePolygons(diameter):hatchPolygons(diameter);
@@ -159,17 +165,18 @@ export function buildClockLayers(alpha,n,settings,progress=()=>{},artwork=null) 
     if(useNumerals&&markers){
       // Keep a clean halo around the lettering. Texture cannot intersect or
       // touch a glyph stroke, which also keeps small numerals legible in print.
-      pattern=clipping.difference(pattern,hourNumeralPolygons(settings,.6));
+      pattern=clipping.difference(pattern,automatic?fittedHourPolygons(settings,layout,.6):hourNumeralPolygons(settings,.6));
       const textureArea=detailRegion.length?clipping.intersection(detailRegion,pattern):[];
       first=textureArea.length&&ticks.length?clipping.union(textureArea,ticks):ticks.length?ticks:textureArea;
     }else{
       const foundation=markers?clipping.union(pattern,markerPolygons(diameter,.15)):pattern;
       first=detailRegion.length?clipping.intersection(detailRegion,foundation):[];
     }
+    if(automatic&&ticks.length)first=first.length?clipping.union(first,ticks):ticks;
     if(first.length)layers.push({height:thickness+.4,polygons:first});
   }
   if(ticks.length)layers.push({height:thickness+.8,polygons:ticks});
-  return layers;
+  return finish();
 }
 
 export function makeClockSTL(alpha,n,settings,progress=()=>{},artwork=null) {

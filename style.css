@@ -155,4 +155,10 @@ select:focus-visible{outline:3px solid #9eb48a;outline-offset:3px}
 .fit-test-dialog .fit-test-status{font-size:11px;line-height:1.7;color:#697f56;margin:13px 0}
 .fit-test-actions{display:flex;flex-wrap:wrap;align-items:center;gap:9px}.fit-test-actions .primary-button{margin-top:0;flex:1}
 .fit-test-actions .tool-button{min-height:44px;font-size:11px;white-space:normal}
+.hour-fit-controls{border:1px solid #dce5d2;border-radius:7px;padding:2px 12px 12px;margin-top:14px;background:#f3f6ed}
+.hour-fit-controls .toggle-row{margin-top:8px}.hour-fit-controls .helper{margin-top:8px}.hour-fit-controls .tool-button{margin-top:9px;white-space:normal;width:100%;font-size:10px}
+.recess-settings{border-top:1px solid #dce4d2;margin-top:16px;padding-top:1px}.recess-settings .toggle-row{font-size:12px;margin-top:12px}.recess-settings .toggle-row small{font-size:10px}
+.recess-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 9px;margin:12px 0}.recess-grid label{font-size:10px;color:#718361;line-height:1.5;min-width:0}.recess-grid input{font:inherit;font-size:13px;color:#425a34;display:block;width:100%;min-height:42px;border:1px solid #d5deca;border-radius:5px;background:#fffefa;padding:8px;margin-top:6px}.recess-grid input[aria-invalid="true"]{border-color:#b77350}
+#backingForRecess{margin-top:10px;width:100%;white-space:normal;font-size:10px}#recessSummary{font-size:10px;line-height:1.7}#recessError{line-height:1.6}
+@media(max-width:700px){.hour-fit-controls .tool-button,#backingForRecess{min-height:44px;font-size:11px}.recess-grid label,#recessSummary{font-size:11px}}
 @media(max-width:700px){.fit-test-dialog{padding:18px;max-height:88vh}.fit-test-dialog h2{font-size:25px}.fit-test-summary{font-size:10px}.fit-size-choices{gap:5px}.fit-size-choices strong{font-size:14px}.fit-test-actions{flex-direction:column;align-items:stretch}.fit-test-figure{padding:12px 4px 8px}.fit-test-figure figcaption{font-size:10px}.fit-test-dialog .icon-button{width:30px;height:30px}}

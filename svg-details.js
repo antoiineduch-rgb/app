@@ -6,7 +6,7 @@ export function usesSVGBacking(settings){return settings?.design==='custom'&&set
 export function backingDepth(settings){
   if(!usesSVGBacking(settings))return 0;
   const value=settings.svgBackingThickness??1.2;
-  if(!Number.isFinite(value)||value<1||value>3)throw Error('Choose a backing thickness from 1 to 3 mm.');
+  if(!Number.isFinite(value)||value<1||value>10)throw Error('Choose a backing thickness from 1 to 10 mm.');
   return value;
 }
 export function artworkSurfaceHeight(settings){return settings.thickness+backingDepth(settings);}
