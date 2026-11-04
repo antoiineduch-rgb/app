@@ -32,3 +32,12 @@ test('unknown project data and prototype keys never become application settings'
   const value=parseProject('{"format":"clock-factory-project","version":1,"settings":{"__proto__":{"polluted":true},"extra":"data","design":"round"}}');
   assert.equal(value.settings.design,'round');assert.equal(Object.hasOwn(value.settings,'__proto__'),false);assert.equal(value.settings.extra,undefined);assert.equal({}.polluted,undefined);
 });
+test('filament color choices survive project backups and legacy projects use original colors',()=>{
+  const settings={...DEFAULT_SETTINGS,bambuColors:{'#E53935':'#00CC66','#2855D6':'#00CC66'}};
+  assert.deepEqual(parseProject(serializeProject(settings)).settings.bambuColors,settings.bambuColors);
+  const legacy=JSON.parse(serializeProject(settings));delete legacy.settings.bambuColors;assert.deepEqual(parseProject(JSON.stringify(legacy)).settings.bambuColors,{});
+  for(const invalid of [[],null,{'#E53935':'red'},JSON.parse('{"__proto__":"#000000"}')]){
+    legacy.settings.bambuColors=invalid;assert.throws(()=>parseProject(JSON.stringify(legacy)),/invalid filament colors/);
+  }
+  assert.deepEqual(normalizeSettings({bambuColors:{'#e53935':'#00cc66','bad':'#000000'}}).bambuColors,{'#E53935':'#00CC66'});
+});

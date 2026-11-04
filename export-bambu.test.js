@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {unzipSync,strFromU8} from 'fflate';
 import {extrudeLayers} from './mesh-extrusion.js';
 import {stlToBambu3MF} from './export-bambu.js';
-import {filamentPaint,filamentCode,paintFacet} from './bambu-paint.js';
+import {filamentPaint,filamentCode,paintFacet,recolorFilamentPaint} from './bambu-paint.js';
 const mesh=()=>extrudeLayers([{height:3,polygons:[[[[-10,-10],[10,-10],[10,10],[-10,10],[-10,-10]]]]}]);
 function image(n=80){
   const rgba=new Uint8ClampedArray(n*n*4);
@@ -70,4 +70,16 @@ test('matching the SVG background avoids spending an extra AMS slot on the back'
 test('invalid inputs and unsupported filament counts fail with useful messages',()=>{
   assert.throws(()=>stlToBambu3MF(new ArrayBuffer(84)),/triangle count/);assert.throws(()=>filamentPaint(image(),'red',4),/back color/);assert.throws(()=>filamentPaint(image(),'#123456',3),/filaments/);
   assert.throws(()=>stlToBambu3MF(mesh(),{painting:{...image(),frame:null}}),/placement/);
+});
+test('chosen spool colors merge matching regions into one actual painted filament',()=>{
+  const raster=image(),source=filamentPaint(raster,'#112233',4),overrides={'#FF0000':'#00CC66','#0000FF':'#00CC66'},paint=recolorFilamentPaint(source,overrides);
+  assert.deepEqual(paint.palette,['#112233','#00CC66']);
+  const points=[[-10,-10,3],[10,-10,3],[-10,10,3]];
+  for(const leaf of decodePaint(paintFacet(points,raster.frame,paint),points))assert.equal(paint.palette[leaf.index],'#00CC66');
+  assert.ok(source.palette.includes('#FF0000'),'the source palette is preserved for restoring original colors');
+  const original=unpack(stlToBambu3MF(mesh(),{painting:raster,color:'#112233',backColor:'face'}).buffer),recolored=unpack(stlToBambu3MF(mesh(),{painting:raster,color:'#112233',backColor:'face',colorOverrides:overrides}).buffer);
+  assert.deepEqual(JSON.parse(recolored['Metadata/project_settings.config']).filament_colour,['#112233','#00CC66']);
+  assert.deepEqual(vertices(recolored['3D/3dmodel.model']),vertices(original['3D/3dmodel.model']));
+  assert.deepEqual(triangles(recolored['3D/3dmodel.model']).map(t=>t.indices),triangles(original['3D/3dmodel.model']).map(t=>t.indices));
+  assert.throws(()=>stlToBambu3MF(mesh(),{colorOverrides:{'#FF0000':'bad'}}),/filament colors/i);
 });

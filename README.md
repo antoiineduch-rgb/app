@@ -22,6 +22,10 @@ Set the diameter from 100 to 300 mm in 1 mm steps using the slider or exact-size
 
 The print area starts with two choices: **One-color print** prepares an STL, and **Bambu A1 · colors** prepares a native color 3MF and selects the A1's 256 × 256 mm build plate. **More export options** keeps the format, standard textured 3MF alternative, color limit, and back color available without crowding the main workflow. The A1 build-plate preset can also be chosen independently of the file format; custom dimensions stay editable and the selected plate is remembered on this device. An oversized model's **Make it fit** action remains visible while the plate details are collapsed.
 
+**See your print colors** appears when Bambu export is selected. Its front-view color layout uses the same full-resolution artwork raster and color-reduction algorithm as the exporter, before any mesh is built. Compare **Original** and **Print colors**, change the color pickers to match your spools, or **Reset colors** to return to the SVG palette. Identical chosen colors merge into one exported filament, including native painted-facet indices. This is a color layout preview; use Print mesh for relief and shape inspection, and the slicer for toolpath checks. Paint boundaries are approximate at the printer's resolution.
+
+Filament choices leave the original SVG, relief and mesh geometry unchanged, and support undo/redo, local restoration and .clock project backups. They affect only Bambu exports; STL and standard textured 3MF keep their existing behavior. Color analysis runs in a debounced background worker with a fallback when workers are unavailable. Recoloring, relief and hole/thickness edits reuse its result; obsolete analyses cannot replace the current layout. Set your real filament/material profiles and AMS assignments in Bambu Studio before slicing.
+
 After exporting, the next steps match the file: Bambu users are told to open it as a project and map filaments, while STL and standard textured 3MF have their own instructions. **Download again** reuses the prepared file. On small screens, a fixed shortcut bar jumps to **Edit design**, **See preview**, or **Download** without changing the design. The help dialog gives a three-step introduction with optional movement and printing details.
 
 ## Real 3D preview and print checks
@@ -36,8 +40,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.6.0-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.6.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.7.0-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.7.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
@@ -89,6 +93,6 @@ Run `npm run test:svg-details` for original SVG color, gradient, pattern, fine-l
 
 Run `npm run test:studio` for project round-trips and native downloads, undo/redo and native menus, exact-size validation, genuine rendered 3D pixels, shared preview/export builds, build-plate fit, disconnected-part detection, cancellation during texture loading, mobile layout, and graphics fallback. It also checks real downloads from the quick print choices, file-specific instructions, repeat downloads, saved A1/custom plate settings, and actual shortcut navigation at 320 and 390 pixels. The test uses software WebGL for deterministic graphics; the shipped application uses the device's normal graphics settings. On display-free Linux, run `npx electron --no-sandbox --ozone-platform=headless tests/studio.electron.cjs` after building, without `--disable-gpu`.
 
-Run `npm run test:bambu` for real desktop A1 exports, all four source colors, native sub-facet paint, exact STL geometry, color limits, back-color choices, and worker fallback. On display-free Linux use the same headless flags as the other SVG suites.
+Run `npm run test:bambu` for real desktop A1 exports, all four source colors, native sub-facet paint, exact STL geometry, color limits, back-color choices, and worker fallback. It also compares actual color-preview pixels with exported palettes, checks merged filament assignments, undo/reset/project restoration, analysis reuse, superseded jobs, and usable color pickers at 320 and 390 pixels. On display-free Linux use the same headless flags as the other SVG suites.
 
 For an independent consumer check, install Bambu Studio locally and run `node tests/bambu-reference.cjs /path/to/bambu-studio exported-bambu-a1.3mf`. This opens and saves the file in an isolated temporary profile, then asserts that Studio preserved every palette color and every painted facet/subdivision tree. It never slices, uploads, or prints. The A1 export was checked this way with official Bambu Studio 2.9.1.70.

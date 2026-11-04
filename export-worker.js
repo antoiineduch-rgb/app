@@ -4227,9 +4227,35 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return { triangles: count, vertices: parents.length, components, min, max, dimensions: max.map((value, i2) => value - min[i2]), volume: Math.abs(volume), surfaceArea, bytes: view.byteLength };
   }
 
+  // filament-colors.js
+  var hex = /^#[0-9a-f]{6}$/i;
+  var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  function validFilamentOverrides(value) {
+    return record(value) && Object.keys(value).length <= 64 && Object.entries(value).every(([source, target]) => hex.test(source) && typeof target === "string" && hex.test(target));
+  }
+  function normalizeFilamentOverrides(value) {
+    if (!record(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([source, target]) => hex.test(source) && typeof target === "string" && hex.test(target)).slice(-64).map(([source, target]) => [source.toUpperCase(), target.toUpperCase()]));
+  }
+  function filamentColors(sourcePalette, overrides = {}) {
+    if (!validFilamentOverrides(overrides)) throw Error("Filament colors must use valid six-digit HEX values.");
+    const normalized = normalizeFilamentOverrides(overrides), palette = [], indices = [], colors = [];
+    for (const source of sourcePalette) {
+      const color = normalized[source.toUpperCase()] || source.toUpperCase();
+      let index = palette.indexOf(color);
+      if (index < 0) {
+        index = palette.length;
+        palette.push(color);
+      }
+      indices.push(index);
+      colors.push(color);
+    }
+    return { palette, indices, colors };
+  }
+
   // bambu-paint.js
-  var rgb = (hex2) => [1, 3, 5].map((at) => parseInt(hex2.slice(at, at + 2), 16));
-  var hex = (color) => "#" + color.map((value) => Math.round(value).toString(16).padStart(2, "0")).join("").toUpperCase();
+  var rgb = (hex3) => [1, 3, 5].map((at) => parseInt(hex3.slice(at, at + 2), 16));
+  var hex2 = (color) => "#" + color.map((value) => Math.round(value).toString(16).padStart(2, "0")).join("").toUpperCase();
   var distance = (a, b) => 0.2126 * (a[0] - b[0]) ** 2 + 0.7152 * (a[1] - b[1]) ** 2 + 0.0722 * (a[2] - b[2]) ** 2;
   var bin = (r, g, b) => (r >> 3) * 1024 + (g >> 3) * 32 + (b >> 3);
   function composite(data, at, base) {
@@ -4248,13 +4274,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       for (let k = 0; k < 3; k++) sums[k][key] += rgba[at + k];
     }
-    return best ? hex(sums.map((values) => values[mode] / best)) : fallback;
+    return best ? hex2(sums.map((values) => values[mode] / best)) : fallback;
   }
   function filamentPaint(raster, baseColor, maxColors = 4) {
     if (![2, 4, 8, 16].includes(maxColors)) throw Error("Choose 2, 4, 8, or 16 filaments.");
     if (typeof baseColor !== "string" || !/^#[0-9a-f]{6}$/i.test(baseColor)) throw Error("Choose a valid back color.");
     const base = rgb(baseColor);
-    if (!raster) return { palette: [hex(base)], map: null, mips: null };
+    if (!raster) return { palette: [hex2(base)], map: null, mips: null };
     const { rgba, width, height } = raster;
     if (!(rgba instanceof Uint8Array || rgba instanceof Uint8ClampedArray) || !Number.isInteger(width) || width < 2 || width > 2048 || height !== width || rgba.length !== width * height * 4) throw Error("The SVG filament-color image is incomplete.");
     const counts2 = new Uint32Array(32768), sums = [new Float64Array(32768), new Float64Array(32768), new Float64Array(32768)];
@@ -4308,10 +4334,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     }
     const colors = [base];
     for (const group of representatives.slice(1).sort((a, b) => b.mass - a.mass)) if (group.mode && group.mass >= Math.max(1, total * 5e-4) && !colors.some((color) => distance(color, group.mode.color) < 16)) colors.push(group.mode.color);
-    const palette = colors.map(hex), lookup = new Uint8Array(32768);
+    const palette = colors.map(hex2), lookup = new Uint8Array(32768);
     for (const sample of samples) lookup[sample.key] = nearest(sample.color, colors);
     const map = new Uint8Array(width * height);
     for (let i2 = 0; i2 < map.length; i2++) if (rgba[i2 * 4 + 3] >= 128) map[i2] = lookup[bin(...composite(rgba, i2 * 4, base))];
+    return { palette, map, mips: paintMips(map, width), width };
+  }
+  function paintMips(map, width) {
     const mips = [{ width, data: Uint16Array.from(map, (value) => 1 << value) }];
     while (mips.at(-1).width > 1) {
       const previous = mips.at(-1), size = Math.ceil(previous.width / 2), data = new Uint16Array(size * size);
@@ -4322,7 +4351,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       mips.push({ width: size, data });
     }
-    return { palette, map, mips, width };
+    return mips;
+  }
+  function recolorFilamentPaint(paint, overrides = {}) {
+    const { palette, indices } = filamentColors(paint.palette, overrides);
+    if (!paint.map || indices.every((value, i2) => value === i2)) return { ...paint, palette };
+    const map = paint.map.map((index) => indices[index]);
+    return { ...paint, palette, map, mips: paintMips(map, paint.width) };
   }
   function filamentCode(index) {
     if (!Number.isInteger(index) || index < 0 || index >= 16) throw Error("The filament index is invalid.");
@@ -4371,12 +4406,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
 
   // export-bambu.js
   var header = '<?xml version="1.0" encoding="UTF-8"?>';
-  function stlToBambu3MF(buffer, { name = "Clock Factory", color = "#C47F62", painting = null, maxColors = 4, backColor = "background" } = {}) {
+  function stlToBambu3MF(buffer, { name = "Clock Factory", color = "#C47F62", painting = null, maxColors = 4, backColor = "background", colorOverrides = {} } = {}) {
     if (typeof name !== "string") throw new TypeError("The model name must be text.");
     if (![2, 4].includes(maxColors)) throw Error("An A1 with AMS Lite supports up to 4 filaments. Choose 2 or 4 colors.");
     if (painting && (!painting.frame || painting.frame.n !== painting.width || !Number.isFinite(painting.thickness) || painting.thickness <= 0)) throw Error("The SVG filament colors have an invalid placement.");
     if (!["background", "face"].includes(backColor)) throw Error("Choose a valid back color mode.");
-    const paint = filamentPaint(painting, backColor === "background" ? dominantArtworkColor(painting, color) : color, maxColors), title = escapeXML(name.trim() || "Clock Factory"), vertices = [], triangles = [], ids = /* @__PURE__ */ new Map(), budget = { nodes: 0 };
+    const paint = recolorFilamentPaint(filamentPaint(painting, backColor === "background" ? dominantArtworkColor(painting, color) : color, maxColors), colorOverrides), title = escapeXML(name.trim() || "Clock Factory"), vertices = [], triangles = [], ids = /* @__PURE__ */ new Map(), budget = { nodes: 0 };
     let minX = Infinity, minY = Infinity;
     const vertex = (point) => {
       const key = point.join(",");
@@ -4413,6 +4448,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   self.onmessage = ({ data }) => {
     const { id, alpha, n, settings, stlBuffer, artwork } = data;
     try {
+      if (data.operation === "filament-proof") {
+        const base = settings.bambuBackColor === "background" ? dominantArtworkColor(artwork.painting, settings.faceColor) : settings.faceColor;
+        const paint = filamentPaint(artwork.painting, base, settings.filamentCount);
+        self.postMessage({ id, palette: paint.palette, map: paint.map, width: paint.width }, [paint.map.buffer]);
+        return;
+      }
       const mesh = stlBuffer || makeClockSTL(new Uint8Array(alpha), n, settings, (stage) => self.postMessage({ id, stage }), artwork);
       const stats = data.stats || analyzeSTL(mesh);
       if (settings.exportFormat === "3mf") {
@@ -4420,7 +4461,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         let buffer, palette = null;
         if (settings.threeMFTarget === "bambu-a1") {
           self.postMessage({ id, stage: "filaments" });
-          const result = stlToBambu3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor || "#C47F62", painting: artwork?.painting, maxColors: settings.filamentCount || 4, backColor: settings.bambuBackColor });
+          const result = stlToBambu3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor || "#C47F62", painting: artwork?.painting, maxColors: settings.filamentCount || 4, backColor: settings.bambuBackColor, colorOverrides: settings.bambuColors });
           buffer = result.buffer;
           palette = result.palette;
         } else buffer = stlTo3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor || "#C47F62", artwork: artwork?.texture });

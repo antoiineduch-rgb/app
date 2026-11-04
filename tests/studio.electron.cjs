@@ -21,7 +21,7 @@ async function run(window){
   const evaluate=(fn,...args)=>window.webContents.executeJavaScript(`(${fn.toString()})(${args.map(value=>JSON.stringify(value)).join(',')})`,true);
   const click=id=>evaluate(id=>document.getElementById(id).click(),id);
   const set=(id,value,event='input')=>evaluate((id,value,event)=>{const input=document.getElementById(id);if(input.type==='checkbox')input.checked=value;else input.value=value;input.dispatchEvent(new Event(event,{bubbles:true}));},id,value,event);
-  const wait=async(fn,description)=>{const deadline=Date.now()+30000;while(Date.now()<deadline){const result=await evaluate(fn);if(result)return result;await new Promise(resolve=>setTimeout(resolve,30));}throw Error('Timed out: '+description+'; '+await evaluate(()=>document.getElementById('meshStateText').textContent+'; '+document.getElementById('toast').textContent));};
+  const wait=async(fn,description,...args)=>{const deadline=Date.now()+30000;while(Date.now()<deadline){const result=await evaluate(fn,...args);if(result)return result;await new Promise(resolve=>setTimeout(resolve,30));}throw Error('Timed out: '+description+'; '+await evaluate(()=>document.getElementById('meshStateText').textContent+'; '+document.getElementById('toast').textContent));};
   async function hooks(){await evaluate(()=>{
     window.__studioErrors=[];window.addEventListener('error',event=>window.__studioErrors.push(event.message));window.addEventListener('unhandledrejection',event=>window.__studioErrors.push(String(event.reason)));
     window.__studioDownloads=[];window.__studioBlobs=new Map();const create=URL.createObjectURL.bind(URL);URL.createObjectURL=blob=>{const url=create(blob);window.__studioBlobs.set(url,blob);return url;};
@@ -183,7 +183,7 @@ async function run(window){
       const point=await evaluate(target=>{const link=document.querySelector(`.mobile-shortcuts a[href="#${target}"]`),r=link.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),height:r.height};},target);
       assert.ok(point.height>=44,'touch shortcuts have full-size targets');
       window.webContents.sendInputEvent({type:'mouseDown',x:point.x,y:point.y,button:'left',clickCount:1});window.webContents.sendInputEvent({type:'mouseUp',x:point.x,y:point.y,button:'left',clickCount:1});
-      await wait(()=>location.hash&&document.getElementById(location.hash.slice(1))?.getBoundingClientRect().top<innerHeight-90,'shortcut navigation');
+      await wait(target=>location.hash==='#'+target&&document.getElementById(target).getBoundingClientRect().top<innerHeight-90,'shortcut navigation',target);
       assert.equal(await evaluate(()=>location.hash),'#'+target);
     }
   }

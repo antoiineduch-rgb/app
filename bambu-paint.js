@@ -2,6 +2,7 @@
 // subdivision tree. Splits change paint only, never the validated print mesh.
 // Format reference: bambulab/BambuStudio, TriangleSelector::perform_split and
 // FacetsAnnotation::get_triangle_as_string. This encoder is implemented locally.
+import {filamentColors} from './filament-colors.js';
 const rgb=hex=>[1,3,5].map(at=>parseInt(hex.slice(at,at+2),16));
 const hex=color=>'#'+color.map(value=>Math.round(value).toString(16).padStart(2,'0')).join('').toUpperCase();
 const distance=(a,b)=>.2126*(a[0]-b[0])**2+.7152*(a[1]-b[1])**2+.0722*(a[2]-b[2])**2;
@@ -50,6 +51,10 @@ export function filamentPaint(raster,baseColor,maxColors=4){
   for(const sample of samples)lookup[sample.key]=nearest(sample.color,colors);
   const map=new Uint8Array(width*height);
   for(let i=0;i<map.length;i++)if(rgba[i*4+3]>=128)map[i]=lookup[bin(...composite(rgba,i*4,base))];
+  return {palette,map,mips:paintMips(map,width),width};
+}
+
+function paintMips(map,width){
   const mips=[{width,data:Uint16Array.from(map,value=>1<<value)}];
   while(mips.at(-1).width>1){
     const previous=mips.at(-1),size=Math.ceil(previous.width/2),data=new Uint16Array(size*size);
@@ -59,7 +64,14 @@ export function filamentPaint(raster,baseColor,maxColors=4){
     }
     mips.push({width:size,data});
   }
-  return {palette,map,mips,width};
+  return mips;
+}
+
+export function recolorFilamentPaint(paint,overrides={}){
+  const {palette,indices}=filamentColors(paint.palette,overrides);
+  if(!paint.map||indices.every((value,i)=>value===i))return {...paint,palette};
+  const map=paint.map.map(index=>indices[index]);
+  return {...paint,palette,map,mips:paintMips(map,paint.width)};
 }
 
 export function filamentCode(index){

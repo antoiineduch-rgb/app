@@ -2402,14 +2402,14 @@
     if (!validThumbnail(input.thumbnail)) throw new TypeError("The SVG thumbnail must be a PNG image smaller than 512 KB.");
     return { name: cleanName(input.name), source: input.source, thumbnail: input.thumbnail, size };
   }
-  function validRecord(record2) {
-    return record2 && typeof record2.id === "string" && record2.id.length > 0 && record2.id.length <= 128 && typeof record2.source === "string" && record2.source.length <= MAX_SOURCE_BYTES && typeof record2.name === "string" && validThumbnail(record2.thumbnail) && Number.isSafeInteger(record2.size) && record2.size > 0 && record2.size <= MAX_SOURCE_BYTES && Number.isSafeInteger(record2.updatedAt) && record2.updatedAt > 0;
+  function validRecord(record3) {
+    return record3 && typeof record3.id === "string" && record3.id.length > 0 && record3.id.length <= 128 && typeof record3.source === "string" && record3.source.length <= MAX_SOURCE_BYTES && typeof record3.name === "string" && validThumbnail(record3.thumbnail) && Number.isSafeInteger(record3.size) && record3.size > 0 && record3.size <= MAX_SOURCE_BYTES && Number.isSafeInteger(record3.updatedAt) && record3.updatedAt > 0;
   }
-  function metadata(record2) {
-    return { id: record2.id, name: cleanName(record2.name), size: record2.size, updatedAt: record2.updatedAt, thumbnail: record2.thumbnail };
+  function metadata(record3) {
+    return { id: record3.id, name: cleanName(record3.name), size: record3.size, updatedAt: record3.updatedAt, thumbnail: record3.thumbnail };
   }
-  function fullRecord(record2) {
-    return { ...metadata(record2), source: record2.source };
+  function fullRecord(record3) {
+    return { ...metadata(record3), source: record3.source };
   }
   async function transaction(mode, action, run) {
     const database = await openDatabase();
@@ -2475,17 +2475,17 @@
       request.onsuccess = () => {
         try {
           const records = request.result.filter(validRecord);
-          const matching = records.find((record2) => record2.source === entry.source);
-          const ids = new Set(request.result.map((record2) => record2.id));
+          const matching = records.find((record3) => record3.source === entry.source);
+          const ids = new Set(request.result.map((record3) => record3.id));
           let id = matching?.id;
           while (!id || !matching && ids.has(id)) id = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${fallbackId++}`;
-          const lastTime = Math.max(0, ...records.map((record2) => record2.updatedAt));
+          const lastTime = Math.max(0, ...records.map((record3) => record3.updatedAt));
           const updatedAt = Math.max(Date.now(), lastTime < Number.MAX_SAFE_INTEGER ? lastTime + 1 : 0);
           const saved = { id, ...entry, updatedAt };
           store.put(saved);
-          const retained = [saved, ...records.filter((record2) => record2.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt);
-          const keep = new Set(retained.slice(0, MAX_SAVED_SVGS).map((record2) => record2.id));
-          for (const record2 of request.result) if (!keep.has(record2.id)) store.delete(record2.id);
+          const retained = [saved, ...records.filter((record3) => record3.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt);
+          const keep = new Set(retained.slice(0, MAX_SAVED_SVGS).map((record3) => record3.id));
+          for (const record3 of request.result) if (!keep.has(record3.id)) store.delete(record3.id);
           result(fullRecord(saved));
         } catch (error) {
           abort(error);
@@ -4645,9 +4645,35 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength);
   }
 
+  // filament-colors.js
+  var hex = /^#[0-9a-f]{6}$/i;
+  var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  function validFilamentOverrides(value) {
+    return record(value) && Object.keys(value).length <= 64 && Object.entries(value).every(([source, target]) => hex.test(source) && typeof target === "string" && hex.test(target));
+  }
+  function normalizeFilamentOverrides(value) {
+    if (!record(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([source, target]) => hex.test(source) && typeof target === "string" && hex.test(target)).slice(-64).map(([source, target]) => [source.toUpperCase(), target.toUpperCase()]));
+  }
+  function filamentColors(sourcePalette, overrides = {}) {
+    if (!validFilamentOverrides(overrides)) throw Error("Filament colors must use valid six-digit HEX values.");
+    const normalized = normalizeFilamentOverrides(overrides), palette = [], indices = [], colors2 = [];
+    for (const source of sourcePalette) {
+      const color = normalized[source.toUpperCase()] || source.toUpperCase();
+      let index = palette.indexOf(color);
+      if (index < 0) {
+        index = palette.length;
+        palette.push(color);
+      }
+      indices.push(index);
+      colors2.push(color);
+    }
+    return { palette, indices, colors: colors2 };
+  }
+
   // bambu-paint.js
-  var rgb = (hex2) => [1, 3, 5].map((at) => parseInt(hex2.slice(at, at + 2), 16));
-  var hex = (color) => "#" + color.map((value) => Math.round(value).toString(16).padStart(2, "0")).join("").toUpperCase();
+  var rgb = (hex3) => [1, 3, 5].map((at) => parseInt(hex3.slice(at, at + 2), 16));
+  var hex2 = (color) => "#" + color.map((value) => Math.round(value).toString(16).padStart(2, "0")).join("").toUpperCase();
   var distance = (a, b) => 0.2126 * (a[0] - b[0]) ** 2 + 0.7152 * (a[1] - b[1]) ** 2 + 0.0722 * (a[2] - b[2]) ** 2;
   var bin = (r, g, b) => (r >> 3) * 1024 + (g >> 3) * 32 + (b >> 3);
   function composite(data, at, base) {
@@ -4666,13 +4692,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       for (let k = 0; k < 3; k++) sums[k][key] += rgba[at + k];
     }
-    return best ? hex(sums.map((values) => values[mode] / best)) : fallback;
+    return best ? hex2(sums.map((values) => values[mode] / best)) : fallback;
   }
   function filamentPaint(raster, baseColor, maxColors = 4) {
     if (![2, 4, 8, 16].includes(maxColors)) throw Error("Choose 2, 4, 8, or 16 filaments.");
     if (typeof baseColor !== "string" || !/^#[0-9a-f]{6}$/i.test(baseColor)) throw Error("Choose a valid back color.");
     const base = rgb(baseColor);
-    if (!raster) return { palette: [hex(base)], map: null, mips: null };
+    if (!raster) return { palette: [hex2(base)], map: null, mips: null };
     const { rgba, width, height } = raster;
     if (!(rgba instanceof Uint8Array || rgba instanceof Uint8ClampedArray) || !Number.isInteger(width) || width < 2 || width > 2048 || height !== width || rgba.length !== width * height * 4) throw Error("The SVG filament-color image is incomplete.");
     const counts2 = new Uint32Array(32768), sums = [new Float64Array(32768), new Float64Array(32768), new Float64Array(32768)];
@@ -4726,10 +4752,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     }
     const colors2 = [base];
     for (const group of representatives.slice(1).sort((a, b) => b.mass - a.mass)) if (group.mode && group.mass >= Math.max(1, total * 5e-4) && !colors2.some((color) => distance(color, group.mode.color) < 16)) colors2.push(group.mode.color);
-    const palette = colors2.map(hex), lookup = new Uint8Array(32768);
+    const palette = colors2.map(hex2), lookup = new Uint8Array(32768);
     for (const sample of samples) lookup[sample.key] = nearest(sample.color, colors2);
     const map = new Uint8Array(width * height);
     for (let i2 = 0; i2 < map.length; i2++) if (rgba[i2 * 4 + 3] >= 128) map[i2] = lookup[bin(...composite(rgba, i2 * 4, base))];
+    return { palette, map, mips: paintMips(map, width), width };
+  }
+  function paintMips(map, width) {
     const mips = [{ width, data: Uint16Array.from(map, (value) => 1 << value) }];
     while (mips.at(-1).width > 1) {
       const previous = mips.at(-1), size = Math.ceil(previous.width / 2), data = new Uint16Array(size * size);
@@ -4740,7 +4769,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       mips.push({ width: size, data });
     }
-    return { palette, map, mips, width };
+    return mips;
+  }
+  function recolorFilamentPaint(paint, overrides = {}) {
+    const { palette, indices } = filamentColors(paint.palette, overrides);
+    if (!paint.map || indices.every((value, i2) => value === i2)) return { ...paint, palette };
+    const map = paint.map.map((index) => indices[index]);
+    return { ...paint, palette, map, mips: paintMips(map, paint.width) };
   }
   function filamentCode(index) {
     if (!Number.isInteger(index) || index < 0 || index >= 16) throw Error("The filament index is invalid.");
@@ -4789,12 +4824,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
 
   // export-bambu.js
   var header = '<?xml version="1.0" encoding="UTF-8"?>';
-  function stlToBambu3MF(buffer, { name = "Clock Factory", color = "#C47F62", painting = null, maxColors = 4, backColor = "background" } = {}) {
+  function stlToBambu3MF(buffer, { name = "Clock Factory", color = "#C47F62", painting = null, maxColors = 4, backColor = "background", colorOverrides = {} } = {}) {
     if (typeof name !== "string") throw new TypeError("The model name must be text.");
     if (![2, 4].includes(maxColors)) throw Error("An A1 with AMS Lite supports up to 4 filaments. Choose 2 or 4 colors.");
     if (painting && (!painting.frame || painting.frame.n !== painting.width || !Number.isFinite(painting.thickness) || painting.thickness <= 0)) throw Error("The SVG filament colors have an invalid placement.");
     if (!["background", "face"].includes(backColor)) throw Error("Choose a valid back color mode.");
-    const paint = filamentPaint(painting, backColor === "background" ? dominantArtworkColor(painting, color) : color, maxColors), title = escapeXML(name.trim() || "Clock Factory"), vertices = [], triangles = [], ids = /* @__PURE__ */ new Map(), budget = { nodes: 0 };
+    const paint = recolorFilamentPaint(filamentPaint(painting, backColor === "background" ? dominantArtworkColor(painting, color) : color, maxColors), colorOverrides), title = escapeXML(name.trim() || "Clock Factory"), vertices = [], triangles = [], ids = /* @__PURE__ */ new Map(), budget = { nodes: 0 };
     let minX = Infinity, minY = Infinity;
     const vertex = (point) => {
       const key = point.join(",");
@@ -4829,17 +4864,18 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
 
   // project.js
   var MAX_PROJECT_BYTES = 12 * 1024 * 1024;
-  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background" });
+  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}) });
   var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] };
   var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.5], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2] };
   var bytes = (value) => new TextEncoder().encode(value).byteLength;
-  var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  var record2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   function projectName(value) {
     return typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f<>]/g, "").trim().slice(0, 80) || "My Clock" : "My Clock";
   }
   function normalizeSettings(input = {}) {
-    if (!record(input)) input = {};
+    if (!record2(input)) input = {};
     const settings = { ...DEFAULT_SETTINGS, projectName: projectName(input.projectName) };
+    settings.bambuColors = normalizeFilamentOverrides(input.bambuColors);
     for (const [key, values] of Object.entries(choices)) if (values.includes(input[key])) settings[key] = input[key];
     for (const [key, [min, max, step]] of Object.entries(ranges)) {
       const value = Number(input[key]);
@@ -4850,7 +4886,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   }
   function checkedArtwork(value) {
     if (value == null) return null;
-    if (!record(value) || typeof value.source !== "string" || !value.source.trim()) throw Error("This project is missing its SVG artwork.");
+    if (!record2(value) || typeof value.source !== "string" || !value.source.trim()) throw Error("This project is missing its SVG artwork.");
     if (value.source.length > 5 * 1024 * 1024 || bytes(value.source) > 5 * 1024 * 1024) throw Error("The project SVG must be smaller than 5 MB.");
     const name = typeof value.name === "string" ? value.name.split(/[\\/]/).at(-1).replace(/[\u0000-\u001f\u007f<>]/g, "").slice(0, 255) : "Imported SVG.svg";
     return { name: name || "Imported SVG.svg", source: value.source };
@@ -4863,13 +4899,14 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     } catch {
       throw Error("This file is not a valid Clock Factory project.");
     }
-    if (!record(data) || data.format !== "clock-factory-project" || data.version !== 1 || !record(data.settings)) throw Error("This project format is not supported. Open a .clock file saved by Clock Factory.");
+    if (!record2(data) || data.format !== "clock-factory-project" || data.version !== 1 || !record2(data.settings)) throw Error("This project format is not supported. Open a .clock file saved by Clock Factory.");
     for (const [key, values] of Object.entries(choices)) if (data.settings[key] !== void 0 && !values.includes(data.settings[key])) throw Error(`The project has an invalid ${key} setting.`);
     for (const [key, [min, max, step]] of Object.entries(ranges)) {
       const value = data.settings[key];
       if (value !== void 0 && (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max || Math.abs(value / step - Math.round(value / step)) > 1e-6)) throw Error(`The project has an invalid ${key} setting.`);
     }
     for (const key of ["markers", "showHands"]) if (data.settings[key] !== void 0 && typeof data.settings[key] !== "boolean") throw Error(`The project has an invalid ${key} setting.`);
+    if (data.settings.bambuColors !== void 0 && !validFilamentOverrides(data.settings.bambuColors)) throw Error("The project has invalid filament colors.");
     const settings = normalizeSettings(data.settings), artwork = checkedArtwork(data.artwork), orientation = normalizeOrientation(data.orientation);
     if (settings.design === "custom" && !artwork) throw Error("The project is missing its imported SVG.");
     if (data.orientation !== void 0 && (!Array.isArray(data.orientation) || data.orientation.length !== 4 || !data.orientation.every((v, i2) => v === orientation[i2]))) throw Error("The project SVG orientation is invalid.");
@@ -5059,6 +5096,212 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return { fits: fit(x2, y) || fit(y, x2), rotated: !fit(x2, y) && fit(y, x2) };
   }
 
+  // filament-preview.js
+  function analyze(painting, settings, workerURL2, signal) {
+    return new Promise((resolve, reject) => {
+      let worker, timer, fallbackTimer, settled = false, fallingBack = false;
+      const finish = (error, result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(fallbackTimer);
+        worker?.terminate();
+        signal.removeEventListener("abort", abort);
+        if (error) reject(error);
+        else resolve(result);
+      };
+      const abort = () => finish(new DOMException("Color preview cancelled", "AbortError"));
+      const fallback = () => {
+        if (settled || fallingBack) return;
+        fallingBack = true;
+        clearTimeout(timer);
+        worker?.terminate();
+        fallbackTimer = setTimeout(() => {
+          try {
+            signal.throwIfAborted();
+            const base = settings.bambuBackColor === "background" ? dominantArtworkColor(painting, settings.faceColor) : settings.faceColor;
+            const { palette, map, width } = filamentPaint(painting, base, settings.filamentCount);
+            finish(null, { palette, map, width });
+          } catch (error) {
+            finish(error);
+          }
+        }, 0);
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      try {
+        worker = new Worker(workerURL2, { name: "clock-filament-preview" });
+        worker.onmessage = ({ data }) => {
+          if (data.id === 2) finish(data.error ? new Error(data.error) : null, data);
+        };
+        worker.onerror = (event) => {
+          event.preventDefault();
+          fallback();
+        };
+        const rgba = painting.rgba.slice();
+        worker.postMessage({ id: 2, operation: "filament-proof", settings, artwork: { painting: { ...painting, rgba } } }, [rgba.buffer]);
+        timer = setTimeout(fallback, 6e4);
+      } catch {
+        fallback();
+      }
+    });
+  }
+  var FilamentPreview = class {
+    constructor({ workerURL: workerURL2, prepareRaster, onColorChange, onReset }) {
+      this.workerURL = workerURL2;
+      this.prepareRaster = prepareRaster;
+      this.onColorChange = onColorChange;
+      this.root = document.getElementById("filamentPreview");
+      this.body = document.getElementById("filamentProofBody");
+      this.status = document.getElementById("filamentProofStatus");
+      this.canvas = document.getElementById("filamentProofCanvas");
+      this.editors = document.getElementById("filamentEditors");
+      this.reset = document.getElementById("resetFilamentColors");
+      this.retry = document.getElementById("filamentProofRetry");
+      this.mode = "print";
+      for (const [id, mode] of [["proofOriginal", "original"], ["proofPrinted", "print"]]) document.getElementById(id).onclick = () => {
+        this.mode = mode;
+        this.draw();
+      };
+      this.editors.addEventListener("input", (event) => {
+        if (event.target.matches('input[type="color"]')) onColorChange(event.target.dataset.source, event.target.value, false);
+      });
+      this.editors.addEventListener("change", (event) => {
+        if (event.target.matches('input[type="color"]')) onColorChange(event.target.dataset.source, event.target.value, true);
+      });
+      this.reset.onclick = onReset;
+      this.retry.onclick = () => {
+        this.cached = null;
+        this.update(this.current);
+      };
+    }
+    cancel() {
+      clearTimeout(this.timer);
+      this.controller?.abort();
+      this.controller = null;
+      this.jobKey = null;
+    }
+    dispose() {
+      this.cancel();
+      this.cached = null;
+    }
+    update(current) {
+      this.current = current;
+      this.root.hidden = !current.enabled;
+      if (!current.enabled) {
+        this.cancel();
+        return;
+      }
+      if (current.busy) {
+        this.cancel();
+        this.loading("Opening your artwork…");
+        return;
+      }
+      if (this.cached?.key === current.key) {
+        if (this.jobKey && this.jobKey !== current.key) this.cancel();
+        this.draw();
+        return;
+      }
+      if (this.jobKey === current.key) return;
+      this.cancel();
+      this.jobKey = current.key;
+      this.loading("Preparing your printable colors…");
+      const controller = new AbortController();
+      this.controller = controller;
+      this.timer = setTimeout(() => this.build(current, controller), 250);
+    }
+    loading(message) {
+      this.root.dataset.ready = "false";
+      this.root.setAttribute("aria-busy", "true");
+      this.body.hidden = true;
+      this.status.textContent = message;
+      this.retry.hidden = true;
+      this.reset.disabled = true;
+    }
+    async build(current, controller) {
+      try {
+        controller.signal.throwIfAborted();
+        const painting = this.prepareRaster(current.snapshot), paint = await analyze(painting, current.snapshot.settings, this.workerURL, controller.signal);
+        controller.signal.throwIfAborted();
+        if (this.current.key !== current.key || !this.current.enabled || this.current.busy) return;
+        this.cached = { key: current.key, painting, paint };
+        this.draw();
+      } catch (error) {
+        if (error.name !== "AbortError" && this.current.key === current.key) {
+          this.status.textContent = "Color preview unavailable. You can still export, or try the preview again.";
+          this.retry.hidden = false;
+        }
+      } finally {
+        if (this.controller === controller) {
+          this.controller = null;
+          this.jobKey = null;
+          this.root.setAttribute("aria-busy", "false");
+        }
+      }
+    }
+    draw() {
+      if (!this.cached || !this.current?.enabled || this.cached.key !== this.current.key || this.current.busy) return;
+      const { painting, paint } = this.cached, { overrides, snapshot } = this.current;
+      const displayKey = JSON.stringify([this.cached.key, overrides, this.mode, snapshot.settings.hole]);
+      if (this.displayKey === displayKey && this.root.dataset.ready === "true") return;
+      this.displayKey = displayKey;
+      const mapped = filamentColors(paint.palette, overrides), merged = paint.palette.length - mapped.palette.length;
+      this.root.dataset.ready = "true";
+      this.root.setAttribute("aria-busy", "false");
+      this.body.hidden = false;
+      this.retry.hidden = true;
+      this.status.textContent = `${mapped.palette.length} printable filament${mapped.palette.length === 1 ? "" : "s"}${merged ? ` · ${merged} matching color${merged === 1 ? "" : "s"} merged` : ""}.`;
+      this.reset.disabled = !Object.keys(overrides).length;
+      document.getElementById("proofOriginal").setAttribute("aria-pressed", String(this.mode === "original"));
+      document.getElementById("proofPrinted").setAttribute("aria-pressed", String(this.mode === "print"));
+      this.canvas.setAttribute("aria-label", this.mode === "original" ? "Original artwork colors, front view" : "Printable filament colors, front view");
+      const signature = paint.palette.join(",");
+      if (this.signature !== signature) {
+        this.signature = signature;
+        this.editors.replaceChildren();
+        paint.palette.forEach((source, i2) => {
+          const row = document.createElement("div"), label = document.createElement("label"), dot = document.createElement("i"), text = document.createElement("span"), small = document.createElement("small"), input = document.createElement("input"), value = document.createElement("span");
+          row.className = "filament-editor";
+          dot.style.background = source;
+          text.textContent = i2 ? "Artwork region " + (i2 + 1) : "Back & face";
+          small.textContent = source;
+          text.append(small);
+          label.append(dot, text);
+          input.type = "color";
+          input.id = "filamentColor" + i2;
+          input.dataset.source = source;
+          input.setAttribute("aria-label", `Filament color for ${source}`);
+          label.htmlFor = input.id;
+          value.className = "filament-color-value";
+          row.append(label, input, value);
+          this.editors.append(row);
+        });
+      }
+      [...this.editors.children].forEach((row, i2) => {
+        const input = row.querySelector("input");
+        if (input.value.toUpperCase() !== mapped.colors[i2]) input.value = mapped.colors[i2];
+        row.querySelector(".filament-color-value").textContent = `${mapped.indices[i2] + 1} · ${mapped.colors[i2]}`;
+      });
+      const n = painting.width, size = this.canvas.width, context = this.canvas.getContext("2d"), image = context.createImageData(size, size), { frame, rgba } = painting;
+      const span = snapshot.settings.diameter / frame.scale * 1.08, palette = mapped.palette.map((color) => [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16)));
+      const radius = snapshot.settings.hole / 2 / frame.scale;
+      for (let y = 0; y < size; y++) for (let x2 = 0; x2 < size; x2++) {
+        const px = frame.cx + ((x2 + 0.5) / size - 0.5) * span, py = frame.cy + ((y + 0.5) / size - 0.5) * span;
+        if (px < 0 || py < 0 || px >= n || py >= n || (px - frame.cx) ** 2 + (py - frame.cy) ** 2 < radius ** 2) continue;
+        const pixel = Math.floor(py) * n + Math.floor(px), source = pixel * 4, target = (y * size + x2) * 4;
+        if (this.mode === "original") image.data.set(rgba.subarray(source, source + 4), target);
+        else if (rgba[source + 3] >= 128) {
+          image.data.set(palette[mapped.indices[paint.map[pixel]]], target);
+          image.data[target + 3] = 255;
+        }
+      }
+      context.putImageData(image, 0, 0);
+    }
+  };
+
   // app.js
   var $ = (id) => document.getElementById(id);
   var colors = [["Terracotta", "#c47f62"], ["Oat milk", "#dfd5bd"], ["Sage", "#94a18a"], ["Forest", "#485c48"], ["Ink", "#434643"], ["Lavender", "#aaa0b5"], ["Dusty rose", "#c99d99"]];
@@ -5134,7 +5377,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? settings.hourStyle : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null]);
   }
   function fileKey(settings = state) {
-    return JSON.stringify([geometryKey(settings), settings.exportFormat, settings.exportFormat === "3mf" ? [colors[settings.color][1], settings.threeMFTarget, settings.threeMFTarget === "bambu-a1" ? [settings.filamentCount, settings.bambuBackColor] : null] : null]);
+    return JSON.stringify([geometryKey(settings), settings.exportFormat, settings.exportFormat === "3mf" ? [colors[settings.color][1], settings.threeMFTarget, settings.threeMFTarget === "bambu-a1" ? [settings.filamentCount, settings.bambuBackColor, Object.entries(settings.bambuColors).sort()] : null] : null]);
   }
   function toast(message) {
     $("toast").textContent = message;
@@ -5237,7 +5480,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("svgTone").value = state.svgTone;
     $("texture").hidden = $("textureLabel").hidden = detailed;
     $("faceColorHint").textContent = detailed ? "Your SVG keeps its original colors. This filament color is used for the back and edges." : "A preview of your filament color. Choose the matching filament when you print.";
-    if (detailed && state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1" && state.bambuBackColor === "background") $("faceColorHint").textContent = "The Bambu export matches the SVG background on the back. Choose “Use selected face color” in its export options to use this swatch.";
+    if (detailed && state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1" && state.bambuBackColor === "background") $("faceColorHint").textContent = "The back starts with the SVG background color. Adjust it in “See your print colors”, or choose “Use selected face color” in the export options to use this swatch.";
     updateExportFormatUI();
     const d = designs.find((d2) => d2.id === state.design);
     $("designTitle").innerHTML = d ? `The ${d.name} Clock <span>↗</span>` : "Your Custom Clock <span>↗</span>";
@@ -5459,6 +5702,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("bambuOptions").hidden = !bambu;
     if (bambu) $("exportFormatHint").textContent = "Open the .3mf as a project in Bambu Studio. Check your A1 0.4 mm and filament presets, then map the numbered colors to your AMS spools before slicing.";
     showFilamentPalette(exportCache?.key === fileKey() ? exportCache.palette : null);
+    updateFilamentPreview();
     if (!exportController) $("export").innerHTML = `Download ${format} <span>↓</span>`;
   }
   function showFilamentPalette(palette) {
@@ -5655,6 +5899,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     }
     updateSaveLabel();
     updateHistoryUI();
+    updateFilamentPreview();
   }
   async function refreshGallery() {
     const sequence = ++gallerySequence;
@@ -5696,12 +5941,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     context.drawImage(image, 0, 0, 128, 128);
     return canvas.toDataURL("image/png");
   }
-  function activateArtwork(prepared, record2, { useCustom = true, orientation = null } = {}) {
+  function activateArtwork(prepared, record3, { useCustom = true, orientation = null } = {}) {
     customSVG = prepared.markup;
     customArtwork = prepared.artworkMarkup;
     customImage = prepared.image;
     customRevision = ++revisionCounter;
-    activeArtwork = { ...record2 };
+    activeArtwork = { ...record3 };
     artworkOrientation = normalizeOrientation(orientation);
     if (useCustom) state.design = "custom";
     render();
@@ -5719,11 +5964,11 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       if (file.size > SVG_IMPORT_MAX_BYTES) throw Error("Please choose an SVG smaller than 5 MB.");
       const source = await file.text(), prepared = await prepareSVG(source);
       if (sequence !== importSequence) return;
-      const record2 = { id: null, name: file.name, source, size: file.size, thumbnail: thumbnailFor(prepared.image) };
-      activateArtwork(prepared, record2);
+      const record3 = { id: null, name: file.name, source, size: file.size, thumbnail: thumbnailFor(prepared.image) };
+      activateArtwork(prepared, record3);
       let saved = false;
       try {
-        const stored = await saveSVG(record2);
+        const stored = await saveSVG(record3);
         if (sequence !== importSequence) {
           if (activeArtwork && !activeArtwork.id && activeArtwork.source === stored.source) {
             activeArtwork = { ...stored };
@@ -5771,18 +6016,18 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     updateArtworkUI();
     let recordRead = false;
     try {
-      const record2 = await getSavedSVG(id);
+      const record3 = await getSavedSVG(id);
       if (sequence !== importSequence) return;
-      if (!record2) {
+      if (!record3) {
         if (restoring) restoreReference = null;
         throw Error("This saved SVG is no longer available. Choose its original file to import it again.");
       }
       recordRead = true;
-      const prepared = await prepareSVG(record2.source);
+      const prepared = await prepareSVG(record3.source);
       if (sequence !== importSequence) return;
       restoreReference = null;
-      activateArtwork(prepared, record2, { useCustom, orientation });
-      $("uploadStatus").textContent = `Loaded ${record2.name}. Saved on this device.`;
+      activateArtwork(prepared, record3, { useCustom, orientation });
+      $("uploadStatus").textContent = `Loaded ${record3.name}. Saved on this device.`;
       if (useCustom) tab(true);
     } catch (error) {
       if (sequence !== importSequence) return;
@@ -5893,7 +6138,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
             let buffer = mesh, palette = null;
             if (settings.exportFormat === "3mf") {
               if (settings.threeMFTarget === "bambu-a1") {
-                const result = stlToBambu3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor, painting: artwork?.painting, maxColors: settings.filamentCount, backColor: settings.bambuBackColor });
+                const result = stlToBambu3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor, painting: artwork?.painting, maxColors: settings.filamentCount, backColor: settings.bambuBackColor, colorOverrides: settings.bambuColors });
                 buffer = result.buffer;
                 palette = result.palette;
               } else buffer = stlTo3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor, artwork: artwork?.texture });
@@ -6033,7 +6278,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     }
     const alpha = new Uint8Array(n * n), pixels = context.getImageData(0, 0, n, n).data;
     for (let i2 = 0; i2 < alpha.length; i2++) alpha[i2] = pixels[i2 * 4 + 3];
-    const frame = mesh.artwork?.texture.frame || artworkFrame(alpha, n, settings.diameter);
+    const frame = mesh?.artwork?.texture.frame || artworkFrame(alpha, n, settings.diameter);
     if (!originalArtwork(settings)) {
       context.globalCompositeOperation = "source-in";
       context.fillStyle = settings.faceColor;
@@ -6042,6 +6287,11 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     context.globalCompositeOperation = "source-atop";
     paintHourDetails(context, settings);
     return { rgba: context.getImageData(0, 0, n, n).data, width: n, height: n, frame, thickness: settings.thickness };
+  }
+  function updateFilamentPreview() {
+    const snapshot = designSnapshot(), settings = snapshot.settings;
+    const key = JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail] : null, settings.diameter, settings.faceColor, settings.markers ? [settings.hourStyle, settings.numberSize, settings.numberPosition] : false, settings.filamentCount, settings.bambuBackColor]);
+    filamentPreview.update({ enabled: state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1", busy: importPending || restorePending || deletingArtwork, key, snapshot, overrides: state.bambuColors });
   }
   var stageMessage = (stage) => ({ outline: "Tracing the clock outline…", details: "Adding the printable details…", mesh: "Closing the print mesh…", package: "Preparing your 3MF file…", filaments: "Mapping your SVG colors to printable filaments…" })[stage] || "Checking your model…";
   function updatePrintSummary() {
@@ -6321,6 +6571,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     meshPreviewController?.abort();
     checkController?.abort();
     meshView?.dispose();
+    filamentPreview.dispose();
   });
   $("cancelExport").onclick = () => exportController?.abort();
   $("export").onclick = async () => {
@@ -6374,6 +6625,17 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       $("printSection").setAttribute("aria-busy", "false");
     }
   };
+  var filamentPreview = new FilamentPreview({ workerURL, prepareRaster: prepareFilamentRaster, onColorChange: (source, color, final) => {
+    const overrides = { ...state.bambuColors };
+    if (source === color.toUpperCase()) delete overrides[source];
+    else overrides[source] = color;
+    state.bambuColors = normalizeFilamentOverrides(overrides);
+    render({ historyGroup: "filament-" + source });
+    if (final) history.endGroup();
+  }, onReset: () => {
+    state.bambuColors = {};
+    render();
+  } });
   render();
   view();
   refreshGallery();

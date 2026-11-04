@@ -11,6 +11,8 @@ import { DEFAULT_SETTINGS,normalizeSettings,projectName,parseProject,serializePr
 import { DesignHistory } from './history.js';
 import { MeshStore } from './mesh-store.js';
 import { analyzeSTL,bedFit } from './mesh-analysis.js';
+import {FilamentPreview} from './filament-preview.js';
+import {normalizeFilamentOverrides} from './filament-colors.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial=DEFAULT_SETTINGS;
@@ -38,7 +40,7 @@ let bed={width:220,depth:220},bedPreset='custom';
 try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500)){bed={width:saved.width,depth:saved.depth};if(saved.preset==='a1'&&saved.width===256&&saved.depth===256)bedPreset='a1';}}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
 function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null]);}
-function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[colors[settings.color][1],settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor]:null]:null]);}
+function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[colors[settings.color][1],settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor,Object.entries(settings.bambuColors).sort()]:null]:null]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
 function updateSaveLabel(){
   document.querySelector('.local-status').textContent=restorePending?'Opening saved SVG…':importPending?'Saving SVG…':!settingsSaved?'Session only':activeArtwork&&!activeArtwork.id?'SVG: session only':'Saved on this device';
@@ -93,7 +95,7 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   $('svgReliefControls').hidden=!detailed;$('svgRelief').value=state.svgRelief;$('svgReliefValue').textContent=state.svgRelief.toFixed(1);$('svgTone').value=state.svgTone;
   $('texture').hidden=$('textureLabel').hidden=detailed;
   $('faceColorHint').textContent=detailed?'Your SVG keeps its original colors. This filament color is used for the back and edges.':'A preview of your filament color. Choose the matching filament when you print.';
-  if(detailed&&state.exportFormat==='3mf'&&state.threeMFTarget==='bambu-a1'&&state.bambuBackColor==='background')$('faceColorHint').textContent='The Bambu export matches the SVG background on the back. Choose “Use selected face color” in its export options to use this swatch.';
+  if(detailed&&state.exportFormat==='3mf'&&state.threeMFTarget==='bambu-a1'&&state.bambuBackColor==='background')$('faceColorHint').textContent='The back starts with the SVG background color. Adjust it in “See your print colors”, or choose “Use selected face color” in the export options to use this swatch.';
   updateExportFormatUI();
   const d=designs.find(d=>d.id===state.design);
   $('designTitle').innerHTML=d?`The ${d.name} Clock <span>↗</span>`:'Your Custom Clock <span>↗</span>';
@@ -196,6 +198,7 @@ function updateExportFormatUI(){
   $('threeMFOptions').hidden=state.exportFormat!=='3mf';$('threeMFTarget').value=state.threeMFTarget;$('filamentCount').value=state.filamentCount;$('bambuBackColor').value=state.bambuBackColor;$('bambuOptions').hidden=!bambu;
   if(bambu)$('exportFormatHint').textContent='Open the .3mf as a project in Bambu Studio. Check your A1 0.4 mm and filament presets, then map the numbered colors to your AMS spools before slicing.';
   showFilamentPalette(exportCache?.key===fileKey()?exportCache.palette:null);
+  updateFilamentPreview();
   if(!exportController)$('export').innerHTML=`Download ${format} <span>↓</span>`;
 }
 function showFilamentPalette(palette){
@@ -265,7 +268,7 @@ function updateArtworkUI(){
   for(const button of $('savedArtworks').querySelectorAll('button')){
     button.disabled=deletingArtwork;button.classList.toggle('selected',button.dataset.artworkId===activeArtwork?.id);
   }
-  updateSaveLabel();updateHistoryUI();
+  updateSaveLabel();updateHistoryUI();updateFilamentPreview();
 }
 async function refreshGallery(){
   const sequence=++gallerySequence;
@@ -379,7 +382,7 @@ function meshAsync(alpha,n,settings,signal,cachedSTL=null,artwork=null,onStage=(
     const abort=()=>finish(new DOMException('Export cancelled','AbortError'));
     const fallback=()=>{
       if(settled||fallingBack)return;fallingBack=true;clearTimeout(timer);worker?.terminate();
-      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();const mesh=cachedSTL||makeClockSTL(alpha,n,settings,undefined,artwork),stats=cachedStats||analyzeSTL(mesh);let buffer=mesh,palette=null;if(settings.exportFormat==='3mf'){if(settings.threeMFTarget==='bambu-a1'){const result=stlToBambu3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,painting:artwork?.painting,maxColors:settings.filamentCount,backColor:settings.bambuBackColor});buffer=result.buffer;palette=result.palette;}else buffer=stlTo3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,artwork:artwork?.texture});}finish(null,{buffer,stlBuffer:mesh,stats,palette});}catch(error){finish(error);}},0);
+      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();const mesh=cachedSTL||makeClockSTL(alpha,n,settings,undefined,artwork),stats=cachedStats||analyzeSTL(mesh);let buffer=mesh,palette=null;if(settings.exportFormat==='3mf'){if(settings.threeMFTarget==='bambu-a1'){const result=stlToBambu3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,painting:artwork?.painting,maxColors:settings.filamentCount,backColor:settings.bambuBackColor,colorOverrides:settings.bambuColors});buffer=result.buffer;palette=result.palette;}else buffer=stlTo3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,artwork:artwork?.texture});}finish(null,{buffer,stlBuffer:mesh,stats,palette});}catch(error){finish(error);}},0);
     };
     signal.addEventListener('abort',abort,{once:true});
     if(signal.aborted){abort();return;}
@@ -464,10 +467,16 @@ function prepareFilamentRaster(snapshot,mesh){
   if(settings.design==='custom')drawPlacedArtwork(context,image,placement);else{context.fillStyle='#fff';context.fill(new Path2D(outlines.get(settings.design)));}
   const alpha=new Uint8Array(n*n),pixels=context.getImageData(0,0,n,n).data;
   for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
-  const frame=mesh.artwork?.texture.frame||artworkFrame(alpha,n,settings.diameter);
+  const frame=mesh?.artwork?.texture.frame||artworkFrame(alpha,n,settings.diameter);
   if(!originalArtwork(settings)){context.globalCompositeOperation='source-in';context.fillStyle=settings.faceColor;context.fillRect(0,0,400,400);}
   context.globalCompositeOperation='source-atop';paintHourDetails(context,settings);
   return {rgba:context.getImageData(0,0,n,n).data,width:n,height:n,frame,thickness:settings.thickness};
+}
+function updateFilamentPreview(){
+  const snapshot=designSnapshot(),settings=snapshot.settings;
+  // Relief, thickness, hole size and recoloring do not change SVG quantization.
+  const key=JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail]:null,settings.diameter,settings.faceColor,settings.markers?[settings.hourStyle,settings.numberSize,settings.numberPosition]:false,settings.filamentCount,settings.bambuBackColor]);
+  filamentPreview.update({enabled:state.exportFormat==='3mf'&&state.threeMFTarget==='bambu-a1',busy:importPending||restorePending||deletingArtwork,key,snapshot,overrides:state.bambuColors});
 }
 const stageMessage=stage=>({outline:'Tracing the clock outline…',details:'Adding the printable details…',mesh:'Closing the print mesh…',package:'Preparing your 3MF file…',filaments:'Mapping your SVG colors to printable filaments…'}[stage]||'Checking your model…');
 function updatePrintSummary(){
@@ -586,7 +595,7 @@ $('projectUpload').onchange=async event=>{
   }catch(error){if(sequence===importSequence)toast('Could not open project: '+error.message);}
   finally{if(sequence===importSequence){importPending=false;updateArtworkUI();persist();checkpointHistory();updateHistoryUI();updatePrintSummary();scheduleMeshPreview();}}
 };
-window.addEventListener('pagehide',()=>{meshPreviewController?.abort();checkController?.abort();meshView?.dispose();});
+window.addEventListener('pagehide',()=>{meshPreviewController?.abort();checkController?.abort();meshView?.dispose();filamentPreview.dispose();});
 $('cancelExport').onclick=()=>exportController?.abort();
 $('export').onclick=async()=>{
   if(importPending||deletingArtwork||restorePending||exportController||!validateDimensions(true))return;
@@ -615,6 +624,10 @@ $('export').onclick=async()=>{
     $('exportProgress').hidden=true;$('printSection').setAttribute('aria-busy','false');
   }
 };
+const filamentPreview=new FilamentPreview({workerURL,prepareRaster:prepareFilamentRaster,onColorChange:(source,color,final)=>{
+  const overrides={...state.bambuColors};if(source===color.toUpperCase())delete overrides[source];else overrides[source]=color;
+  state.bambuColors=normalizeFilamentOverrides(overrides);render({historyGroup:'filament-'+source});if(final)history.endGroup();
+},onReset:()=>{state.bambuColors={};render();}});
 render();view();
 refreshGallery();
 if(restoreReference){

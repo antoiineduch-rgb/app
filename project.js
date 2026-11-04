@@ -1,8 +1,9 @@
 import { designs } from './geometry.js';
 import { normalizeOrientation } from './svg-placement.js';
+import {normalizeFilamentOverrides,validFilamentOverrides} from './filament-colors.js';
 
 export const MAX_PROJECT_BYTES=12*1024*1024;
-export const DEFAULT_SETTINGS=Object.freeze({design:'petal',projectName:'My Clock',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true,hourStyle:'ticks',numberSize:100,numberPosition:100,exportFormat:'stl',svgDetail:'artwork',svgRelief:.8,svgTone:'contrast',showHands:true,threeMFTarget:'bambu-a1',filamentCount:4,bambuBackColor:'background'});
+export const DEFAULT_SETTINGS=Object.freeze({design:'petal',projectName:'My Clock',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true,hourStyle:'ticks',numberSize:100,numberPosition:100,exportFormat:'stl',svgDetail:'artwork',svgRelief:.8,svgTone:'contrast',showHands:true,threeMFTarget:'bambu-a1',filamentCount:4,bambuBackColor:'background',bambuColors:Object.freeze({})});
 const choices={design:[...designs.map(d=>d.id),'custom'],texture:['smooth','ripple','grain'],hourStyle:['ticks','arabic','roman'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light'],threeMFTarget:['bambu-a1','standard'],filamentCount:[2,4],bambuBackColor:['background','face']};
 const ranges={color:[0,6,1],diameter:[100,300,1],thickness:[2,10,.5],hole:[5,15,.5],numberSize:[70,130,5],numberPosition:[80,120,5],svgRelief:[0,2,.2]};
 const bytes=value=>new TextEncoder().encode(value).byteLength;
@@ -11,6 +12,7 @@ export function projectName(value){return typeof value==='string'?value.replace(
 export function normalizeSettings(input={}){
   if(!record(input))input={};
   const settings={...DEFAULT_SETTINGS,projectName:projectName(input.projectName)};
+  settings.bambuColors=normalizeFilamentOverrides(input.bambuColors);
   for(const [key,values]of Object.entries(choices))if(values.includes(input[key]))settings[key]=input[key];
   for(const [key,[min,max,step]]of Object.entries(ranges)){
     const value=Number(input[key]);
@@ -36,6 +38,7 @@ export function parseProject(text){
     if(value!==undefined&&(typeof value!=='number'||!Number.isFinite(value)||value<min||value>max||Math.abs(value/step-Math.round(value/step))>1e-6))throw Error(`The project has an invalid ${key} setting.`);
   }
   for(const key of ['markers','showHands'])if(data.settings[key]!==undefined&&typeof data.settings[key]!=='boolean')throw Error(`The project has an invalid ${key} setting.`);
+  if(data.settings.bambuColors!==undefined&&!validFilamentOverrides(data.settings.bambuColors))throw Error('The project has invalid filament colors.');
   const settings=normalizeSettings(data.settings),artwork=checkedArtwork(data.artwork),orientation=normalizeOrientation(data.orientation);
   if(settings.design==='custom'&&!artwork)throw Error('The project is missing its imported SVG.');
   if(data.orientation!==undefined&&(!Array.isArray(data.orientation)||data.orientation.length!==4||!data.orientation.every((v,i)=>v===orientation[i])))throw Error('The project SVG orientation is invalid.');
