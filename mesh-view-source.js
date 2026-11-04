@@ -40,7 +40,7 @@ export class PrintView{
       for(let j=0;j<3;j++){
         const at=i*9+j*3,x=view.getFloat32(96+i*50+j*12,true),y=view.getFloat32(100+i*50+j*12,true),z=view.getFloat32(104+i*50+j*12,true);
         positions.set([x,y,z],at);normals.set([0,1,2].map(k=>view.getFloat32(84+i*50+k*4,true)),at);
-        if(z<settings.thickness-1e-5)painted=false;
+        if(z<(texture?.thickness??settings.thickness)-1e-5)painted=false;
         if(texture){const {scale,cx,cy,n}=texture.frame;uv.set([(x/scale+cx)/n,1-(cy-y/scale)/n],i*6+j*2);}
       }
       const material=painted?1:0;

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { artworkFrame, artworkRelief } from './svg-details.js';
 import { makeClockSTL } from './mesh.js';
+import {analyzeSTL} from './mesh-analysis.js';
 
 const options={design:'custom',diameter:100,thickness:3,hole:8,texture:'ripple',markers:false,svgDetail:'artwork',svgRelief:.8,svgTone:'contrast',hourStyle:'arabic',numberSize:100,numberPosition:100};
 function drawing(background=[255,255,255],detail=[0,0,0]){
@@ -86,4 +87,34 @@ test('incomplete detail rasters and invalid relief settings are rejected',()=>{
   assert.throws(()=>artworkRelief(new Uint8Array(3),f.alpha,f.n),/incomplete/);
   assert.throws(()=>mesh(f,{svgRelief:-1}),/between 0 and 2/);
   assert.throws(()=>mesh(f,{svgTone:'other'}),/relief style/);
+});
+
+test('a round backing joins separate SVG islands into one closed clock with the exact diameter and an open shaft hole',()=>{
+  const n=100,alpha=new Uint8Array(n*n),rgba=new Uint8ClampedArray(n*n*4);
+  for(let y=20;y<80;y++)for(let x=8;x<92;x++)if(x<30||x>70){const i=y*n+x;alpha[i]=255;rgba.set([20,90,130,255],i*4);}
+  const f={n,alpha,rgba},settings={...options,svgBacking:true,svgBackingThickness:1.2,svgBackingMargin:3,svgRelief:0};
+  assert.equal(analyzeSTL(mesh(f,{svgRelief:0})).components,2);
+  const buffer=mesh(f,settings),stats=analyzeSTL(buffer),result=inspect(buffer),frame=artworkFrame(alpha,n,100,settings);
+  assert.equal(stats.components,1);assert.ok(stats.volume>0);
+  assert.ok(stats.dimensions.slice(0,2).every(value=>Math.abs(value-100)<1e-5));assert.ok(Math.abs(stats.dimensions[2]-4.2)<1e-5);
+  assert.equal(topAt(result.triangles,0,0),-Infinity,'the center hole passes through the entire backing');
+  assert.ok(Math.abs(topAt(result.triangles,0,30)-1.2)<1e-5,'the support fills the gap behind the artwork');
+  for(const triangle of result.triangles)for(const [x,y,z]of triangle)if(z>1.2+1e-5)assert.ok(Math.hypot(x,y)<=47.03,'all artwork fits inside the selected circular border');
+  const p=[(18-frame.cx)*frame.scale,(frame.cy-40)*frame.scale];assert.ok(Math.abs(topAt(result.triangles,...p)-4.2)<1e-5,'the source artwork keeps its original thickness on the support');
+});
+
+test('backed SVGs retain relief, textures and hour numbers at all supported border and support extremes',()=>{
+  const f=drawing();
+  for(const [svgBackingThickness,svgBackingMargin,svgDetail,texture,markers,svgRelief]of [[1,1,'artwork','smooth',false,2],[3,12,'artwork','smooth',true,.8],[1.2,3,'silhouette','ripple',true,0]]){
+    const settings={svgBacking:true,svgBackingThickness,svgBackingMargin,svgDetail,texture,markers,svgRelief},buffer=mesh(f,settings),result=inspect(buffer),stats=analyzeSTL(buffer);
+    assert.equal(stats.components,1);assert.ok(result.maxZ<=3+svgBackingThickness+2+.8+1e-5);assert.ok(result.maxZ>3+svgBackingThickness);
+    assert.equal(topAt(result.triangles,0,0),-Infinity);
+  }
+  assert.deepEqual(new Uint8Array(mesh(f,{svgBacking:false})),new Uint8Array(mesh(f)),'disabled backing keeps the original mesh');
+});
+
+test('invalid backing dimensions are rejected before geometry is generated',()=>{
+  const f=drawing();
+  assert.throws(()=>mesh(f,{svgBacking:true,svgBackingThickness:0}),/backing thickness/);
+  assert.throws(()=>mesh(f,{svgBacking:true,svgBackingMargin:30}),/backing border/);
 });

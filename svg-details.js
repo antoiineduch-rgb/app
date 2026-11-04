@@ -2,14 +2,31 @@ import { traceContours } from './contours.js';
 
 // Use the exact same contour bounds as the clock mesh, including its half-pixel
 // antialiasing. This keeps a 3MF texture registered after fitting or rotation.
-export function artworkFrame(alpha, n, diameter) {
+export function usesSVGBacking(settings){return settings?.design==='custom'&&settings.svgBacking===true;}
+export function backingDepth(settings){
+  if(!usesSVGBacking(settings))return 0;
+  const value=settings.svgBackingThickness??1.2;
+  if(!Number.isFinite(value)||value<1||value>3)throw Error('Choose a backing thickness from 1 to 3 mm.');
+  return value;
+}
+export function artworkSurfaceHeight(settings){return settings.thickness+backingDepth(settings);}
+export function artworkFrame(alpha, n, diameter, settings=null) {
   let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-  for(const ring of traceContours(alpha,n))for(const [x,y]of ring){
+  const contours=traceContours(alpha,n);
+  for(const ring of contours)for(const [x,y]of ring){
     minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);
   }
   const span=Math.max(maxX-minX,maxY-minY);
   if(!Number.isFinite(span)||span<=0)throw Error('The SVG has no printable artwork.');
-  return {scale:diameter/span,cx:(minX+maxX)/2,cy:(minY+maxY)/2,n};
+  const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
+  let scale=diameter/span;
+  if(usesSVGBacking(settings)){
+    const margin=settings.svgBackingMargin??3;
+    if(!Number.isFinite(margin)||margin<1||margin>12||diameter<=margin*2)throw Error('Choose a backing border from 1 to 12 mm.');
+    let radius=0;for(const ring of contours)for(const [x,y]of ring)radius=Math.max(radius,Math.hypot(x-cx,y-cy));
+    scale=(diameter/2-margin)/radius;
+  }
+  return {scale,cx,cy,n};
 }
 
 const luminance=(r,g,b)=>.2126*r+.7152*g+.0722*b;

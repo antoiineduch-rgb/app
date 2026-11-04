@@ -41,3 +41,10 @@ test('filament color choices survive project backups and legacy projects use ori
   }
   assert.deepEqual(normalizeSettings({bambuColors:{'#e53935':'#00cc66','bad':'#000000'}}).bambuColors,{'#E53935':'#00CC66'});
 });
+test('optional SVG backing settings survive projects and default to off for old designs',()=>{
+  const settings={...DEFAULT_SETTINGS,svgBacking:true,svgBackingThickness:2.4,svgBackingMargin:6.5};
+  assert.deepEqual(parseProject(serializeProject(settings)).settings,settings);
+  const legacy=JSON.parse(serializeProject(settings));for(const key of ['svgBacking','svgBackingThickness','svgBackingMargin'])delete legacy.settings[key];
+  assert.equal(parseProject(JSON.stringify(legacy)).settings.svgBacking,false);
+  for(const patch of [{svgBacking:'true'},{svgBackingThickness:.5},{svgBackingMargin:30}])assert.throws(()=>parseProject(JSON.stringify({...legacy,settings:{...legacy.settings,...patch}})),/project/);
+});

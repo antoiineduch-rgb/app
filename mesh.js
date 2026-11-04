@@ -2,7 +2,7 @@ import clipping from 'polygon-clipping';
 import { traceContours, simplifyRing } from './contours.js';
 import { extrudeLayers } from './mesh-extrusion.js';
 import { hourNumeralPolygons } from './hour-numerals.js';
-import { artworkRelief } from './svg-details.js';
+import { artworkRelief,artworkFrame,usesSVGBacking,backingDepth,artworkSurfaceHeight } from './svg-details.js';
 
 const CURVE_ERROR = .02;
 const snap = value => Math.round(value*1e6)/1e6;
@@ -105,15 +105,18 @@ function hatchPolygons(diameter) {
 
 export function buildClockLayers(alpha,n,settings,progress=()=>{},artwork=null) {
   if(!Number.isInteger(n)||n<2||!alpha||alpha.length!==n*n)throw Error('The outline image must be a square pixel grid.');
-  const {diameter,thickness,hole,texture,markers}=settings;
-  if(![diameter,thickness,hole].every(value=>Number.isFinite(value)&&value>0)||!['smooth','ripple','grain'].includes(texture))throw Error('The clock dimensions or texture are invalid.');
+  const {diameter,hole,texture,markers}=settings,thickness=artworkSurfaceHeight(settings),backed=usesSVGBacking(settings);
+  if(![diameter,settings.thickness,thickness,hole].every(value=>Number.isFinite(value)&&value>0)||!['smooth','ripple','grain'].includes(texture))throw Error('The clock dimensions or texture are invalid.');
   progress('outline');
-  const {polygons:outline,frame}=silhouette(alpha,n,diameter);
+  const {polygons:outline,frame}=silhouette(alpha,n,diameter,backed?artworkFrame(alpha,n,diameter,settings):null);
   // An analytic 128+ segment shaft circle maintains the requested fit without
   // stair-stepping or smoothing the hole into an undersized opening.
   const base=clipping.difference(outline,[[circle(hole/2,.001,128)]]);
   if(!base.length)throw Error('The center opening covers the entire clock face.');
-  const layers=[{height:thickness,polygons:base}];
+  const layers=backed?[
+    {height:backingDepth(settings),polygons:clipping.difference([[circle(diameter/2,CURVE_ERROR,128)]],[[circle(hole/2,.001,128)]])},
+    {height:thickness,polygons:base}
+  ]:[{height:thickness,polygons:base}];
   progress('details');
   const detailed=!!artwork?.rgba&&settings.design==='custom'&&settings.svgDetail!=='silhouette';
   if(texture==='smooth'&&!markers&&!detailed)return layers;

@@ -7,7 +7,13 @@ const rgb=hex=>[1,3,5].map(at=>parseInt(hex.slice(at,at+2),16));
 const hex=color=>'#'+color.map(value=>Math.round(value).toString(16).padStart(2,'0')).join('').toUpperCase();
 const distance=(a,b)=>.2126*(a[0]-b[0])**2+.7152*(a[1]-b[1])**2+.0722*(a[2]-b[2])**2;
 const bin=(r,g,b)=>(r>>3)*1024+(g>>3)*32+(b>>3);
-function composite(data,at,base){const a=data[at+3]/255;return [0,1,2].map(k=>Math.round(data[at+k]*a+base[k]*(1-a)));}
+function composite(data,at,base,opaqueBins){
+  // Antialiasing around an opaque fill keeps that fill's color. Blending its
+  // fringe with the base would invent an extra filament. A distinct translucent
+  // fill still composites against the base when it has no opaque counterpart.
+  if(data[at+3]<240&&opaqueBins?.[bin(data[at],data[at+1],data[at+2])])return [data[at],data[at+1],data[at+2]];
+  const a=data[at+3]/255;return [0,1,2].map(k=>Math.round(data[at+k]*a+base[k]*(1-a)));
+}
 
 export function dominantArtworkColor(raster,fallback){
   if(!raster)return fallback;
@@ -24,9 +30,17 @@ export function filamentPaint(raster,baseColor,maxColors=4){
   if(!raster)return {palette:[hex(base)],map:null,mips:null};
   const {rgba,width,height}=raster;
   if(!(rgba instanceof Uint8Array||rgba instanceof Uint8ClampedArray)||!Number.isInteger(width)||width<2||width>2048||height!==width||rgba.length!==width*height*4)throw Error('The SVG filament-color image is incomplete.');
-  const counts=new Uint32Array(32768),sums=[new Float64Array(32768),new Float64Array(32768),new Float64Array(32768)];
+  const counts=new Uint32Array(32768),opaqueBins=new Uint8Array(32768),sums=[new Float64Array(32768),new Float64Array(32768),new Float64Array(32768)];
+  for(let at=0;at<rgba.length;at+=4)if(rgba[at+3]>=240)opaqueBins[bin(rgba[at],rgba[at+1],rgba[at+2])]=1;
+  // Canvas unpremultiplication can move edge channels across a 5-bit bin
+  // boundary. Include adjacent bins when recognizing the same opaque fill.
+  const originalBins=opaqueBins.slice();
+  for(let key=0;key<originalBins.length;key++)if(originalBins[key]){
+    const r=key>>10,g=(key>>5)&31,b=key&31;
+    for(let dr=-1;dr<=1;dr++)for(let dg=-1;dg<=1;dg++)for(let db=-1;db<=1;db++)if(r+dr>=0&&r+dr<32&&g+dg>=0&&g+dg<32&&b+db>=0&&b+db<32)opaqueBins[(r+dr)*1024+(g+dg)*32+b+db]=1;
+  }
   let total=0;
-  for(let at=0;at<rgba.length;at+=4)if(rgba[at+3]>=128){const color=composite(rgba,at,base),key=bin(...color);counts[key]++;total++;for(let k=0;k<3;k++)sums[k][key]+=color[k];}
+  for(let at=0;at<rgba.length;at+=4)if(rgba[at+3]>=128){const color=composite(rgba,at,base,opaqueBins),key=bin(...color);counts[key]++;total++;for(let k=0;k<3;k++)sums[k][key]+=color[k];}
   const samples=[];
   for(let key=0;key<counts.length;key++)if(counts[key])samples.push({key,count:counts[key],color:sums.map(values=>values[key]/counts[key])});
   let centers=[base];
@@ -50,7 +64,7 @@ export function filamentPaint(raster,baseColor,maxColors=4){
   const palette=colors.map(hex),lookup=new Uint8Array(32768);
   for(const sample of samples)lookup[sample.key]=nearest(sample.color,colors);
   const map=new Uint8Array(width*height);
-  for(let i=0;i<map.length;i++)if(rgba[i*4+3]>=128)map[i]=lookup[bin(...composite(rgba,i*4,base))];
+  for(let i=0;i<map.length;i++)if(rgba[i*4+3]>=128)map[i]=lookup[bin(...composite(rgba,i*4,base,opaqueBins))];
   return {palette,map,mips:paintMips(map,width),width};
 }
 

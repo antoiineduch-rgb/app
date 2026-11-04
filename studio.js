@@ -3569,9 +3569,22 @@
   }
 
   // svg-details.js
-  function artworkFrame(alpha, n, diameter) {
+  function usesSVGBacking(settings) {
+    return settings?.design === "custom" && settings.svgBacking === true;
+  }
+  function backingDepth(settings) {
+    if (!usesSVGBacking(settings)) return 0;
+    const value = settings.svgBackingThickness ?? 1.2;
+    if (!Number.isFinite(value) || value < 1 || value > 3) throw Error("Choose a backing thickness from 1 to 3 mm.");
+    return value;
+  }
+  function artworkSurfaceHeight(settings) {
+    return settings.thickness + backingDepth(settings);
+  }
+  function artworkFrame(alpha, n, diameter, settings = null) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const ring of traceContours(alpha, n)) for (const [x2, y] of ring) {
+    const contours = traceContours(alpha, n);
+    for (const ring of contours) for (const [x2, y] of ring) {
       minX = Math.min(minX, x2);
       minY = Math.min(minY, y);
       maxX = Math.max(maxX, x2);
@@ -3579,7 +3592,16 @@
     }
     const span = Math.max(maxX - minX, maxY - minY);
     if (!Number.isFinite(span) || span <= 0) throw Error("The SVG has no printable artwork.");
-    return { scale: diameter / span, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, n };
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    let scale = diameter / span;
+    if (usesSVGBacking(settings)) {
+      const margin = settings.svgBackingMargin ?? 3;
+      if (!Number.isFinite(margin) || margin < 1 || margin > 12 || diameter <= margin * 2) throw Error("Choose a backing border from 1 to 12 mm.");
+      let radius = 0;
+      for (const ring of contours) for (const [x2, y] of ring) radius = Math.max(radius, Math.hypot(x2 - cx, y - cy));
+      scale = (diameter / 2 - margin) / radius;
+    }
+    return { scale, cx, cy, n };
   }
   var luminance = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
   function artworkRelief(rgba, alpha, n, mode = "contrast") {
@@ -3760,13 +3782,16 @@
   function buildClockLayers(alpha, n, settings, progress = () => {
   }, artwork = null) {
     if (!Number.isInteger(n) || n < 2 || !alpha || alpha.length !== n * n) throw Error("The outline image must be a square pixel grid.");
-    const { diameter, thickness, hole, texture, markers } = settings;
-    if (![diameter, thickness, hole].every((value) => Number.isFinite(value) && value > 0) || !["smooth", "ripple", "grain"].includes(texture)) throw Error("The clock dimensions or texture are invalid.");
+    const { diameter, hole, texture, markers } = settings, thickness = artworkSurfaceHeight(settings), backed = usesSVGBacking(settings);
+    if (![diameter, settings.thickness, thickness, hole].every((value) => Number.isFinite(value) && value > 0) || !["smooth", "ripple", "grain"].includes(texture)) throw Error("The clock dimensions or texture are invalid.");
     progress("outline");
-    const { polygons: outline, frame } = silhouette(alpha, n, diameter);
+    const { polygons: outline, frame } = silhouette(alpha, n, diameter, backed ? artworkFrame(alpha, n, diameter, settings) : null);
     const base = import_polygon_clipping3.default.difference(outline, [[circle(hole / 2, 1e-3, 128)]]);
     if (!base.length) throw Error("The center opening covers the entire clock face.");
-    const layers = [{ height: thickness, polygons: base }];
+    const layers = backed ? [
+      { height: backingDepth(settings), polygons: import_polygon_clipping3.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[circle(hole / 2, 1e-3, 128)]]) },
+      { height: thickness, polygons: base }
+    ] : [{ height: thickness, polygons: base }];
     progress("details");
     const detailed = !!artwork?.rgba && settings.design === "custom" && settings.svgDetail !== "silhouette";
     if (texture === "smooth" && !markers && !detailed) return layers;
@@ -4676,7 +4701,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   var hex2 = (color) => "#" + color.map((value) => Math.round(value).toString(16).padStart(2, "0")).join("").toUpperCase();
   var distance = (a, b) => 0.2126 * (a[0] - b[0]) ** 2 + 0.7152 * (a[1] - b[1]) ** 2 + 0.0722 * (a[2] - b[2]) ** 2;
   var bin = (r, g, b) => (r >> 3) * 1024 + (g >> 3) * 32 + (b >> 3);
-  function composite(data, at, base) {
+  function composite(data, at, base, opaqueBins) {
+    if (data[at + 3] < 240 && opaqueBins?.[bin(data[at], data[at + 1], data[at + 2])]) return [data[at], data[at + 1], data[at + 2]];
     const a = data[at + 3] / 255;
     return [0, 1, 2].map((k) => Math.round(data[at + k] * a + base[k] * (1 - a)));
   }
@@ -4701,10 +4727,16 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     if (!raster) return { palette: [hex2(base)], map: null, mips: null };
     const { rgba, width, height } = raster;
     if (!(rgba instanceof Uint8Array || rgba instanceof Uint8ClampedArray) || !Number.isInteger(width) || width < 2 || width > 2048 || height !== width || rgba.length !== width * height * 4) throw Error("The SVG filament-color image is incomplete.");
-    const counts2 = new Uint32Array(32768), sums = [new Float64Array(32768), new Float64Array(32768), new Float64Array(32768)];
+    const counts2 = new Uint32Array(32768), opaqueBins = new Uint8Array(32768), sums = [new Float64Array(32768), new Float64Array(32768), new Float64Array(32768)];
+    for (let at = 0; at < rgba.length; at += 4) if (rgba[at + 3] >= 240) opaqueBins[bin(rgba[at], rgba[at + 1], rgba[at + 2])] = 1;
+    const originalBins = opaqueBins.slice();
+    for (let key = 0; key < originalBins.length; key++) if (originalBins[key]) {
+      const r = key >> 10, g = key >> 5 & 31, b = key & 31;
+      for (let dr = -1; dr <= 1; dr++) for (let dg = -1; dg <= 1; dg++) for (let db = -1; db <= 1; db++) if (r + dr >= 0 && r + dr < 32 && g + dg >= 0 && g + dg < 32 && b + db >= 0 && b + db < 32) opaqueBins[(r + dr) * 1024 + (g + dg) * 32 + b + db] = 1;
+    }
     let total = 0;
     for (let at = 0; at < rgba.length; at += 4) if (rgba[at + 3] >= 128) {
-      const color = composite(rgba, at, base), key = bin(...color);
+      const color = composite(rgba, at, base, opaqueBins), key = bin(...color);
       counts2[key]++;
       total++;
       for (let k = 0; k < 3; k++) sums[k][key] += color[k];
@@ -4755,7 +4787,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const palette = colors2.map(hex2), lookup = new Uint8Array(32768);
     for (const sample of samples) lookup[sample.key] = nearest(sample.color, colors2);
     const map = new Uint8Array(width * height);
-    for (let i2 = 0; i2 < map.length; i2++) if (rgba[i2 * 4 + 3] >= 128) map[i2] = lookup[bin(...composite(rgba, i2 * 4, base))];
+    for (let i2 = 0; i2 < map.length; i2++) if (rgba[i2 * 4 + 3] >= 128) map[i2] = lookup[bin(...composite(rgba, i2 * 4, base, opaqueBins))];
     return { palette, map, mips: paintMips(map, width), width };
   }
   function paintMips(map, width) {
@@ -4864,9 +4896,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
 
   // project.js
   var MAX_PROJECT_BYTES = 12 * 1024 * 1024;
-  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}) });
+  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}), svgBacking: false, svgBackingThickness: 1.2, svgBackingMargin: 3 });
   var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] };
-  var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.5], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2] };
+  var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.5], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2], svgBackingThickness: [1, 3, 0.2], svgBackingMargin: [1, 12, 0.5] };
   var bytes = (value) => new TextEncoder().encode(value).byteLength;
   var record2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   function projectName(value) {
@@ -4881,7 +4913,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       const value = Number(input[key]);
       if (input[key] != null && Number.isFinite(value)) settings[key] = Number(Math.min(max, Math.max(min, Math.round(value / step) * step)).toFixed(5));
     }
-    for (const key of ["markers", "showHands"]) if (typeof input[key] === "boolean") settings[key] = input[key];
+    for (const key of ["markers", "showHands", "svgBacking"]) if (typeof input[key] === "boolean") settings[key] = input[key];
     return settings;
   }
   function checkedArtwork(value) {
@@ -4905,7 +4937,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       const value = data.settings[key];
       if (value !== void 0 && (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max || Math.abs(value / step - Math.round(value / step)) > 1e-6)) throw Error(`The project has an invalid ${key} setting.`);
     }
-    for (const key of ["markers", "showHands"]) if (data.settings[key] !== void 0 && typeof data.settings[key] !== "boolean") throw Error(`The project has an invalid ${key} setting.`);
+    for (const key of ["markers", "showHands", "svgBacking"]) if (data.settings[key] !== void 0 && typeof data.settings[key] !== "boolean") throw Error(`The project has an invalid ${key} setting.`);
     if (data.settings.bambuColors !== void 0 && !validFilamentOverrides(data.settings.bambuColors)) throw Error("The project has invalid filament colors.");
     const settings = normalizeSettings(data.settings), artwork = checkedArtwork(data.artwork), orientation = normalizeOrientation(data.orientation);
     if (settings.design === "custom" && !artwork) throw Error("The project is missing its imported SVG.");
@@ -5287,13 +5319,24 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       });
       const n = painting.width, size = this.canvas.width, context = this.canvas.getContext("2d"), image = context.createImageData(size, size), { frame, rgba } = painting;
       const span = snapshot.settings.diameter / frame.scale * 1.08, palette = mapped.palette.map((color) => [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16)));
-      const radius = snapshot.settings.hole / 2 / frame.scale;
+      const radius = snapshot.settings.hole / 2 / frame.scale, backed = usesSVGBacking(snapshot.settings), backRadius = snapshot.settings.diameter / 2 / frame.scale;
+      const originalBase = [1, 3, 5].map((at) => parseInt(paint.palette[0].slice(at, at + 2), 16));
       for (let y = 0; y < size; y++) for (let x2 = 0; x2 < size; x2++) {
         const px = frame.cx + ((x2 + 0.5) / size - 0.5) * span, py = frame.cy + ((y + 0.5) / size - 0.5) * span;
-        if (px < 0 || py < 0 || px >= n || py >= n || (px - frame.cx) ** 2 + (py - frame.cy) ** 2 < radius ** 2) continue;
-        const pixel = Math.floor(py) * n + Math.floor(px), source = pixel * 4, target = (y * size + x2) * 4;
-        if (this.mode === "original") image.data.set(rgba.subarray(source, source + 4), target);
-        else if (rgba[source + 3] >= 128) {
+        const distance2 = (px - frame.cx) ** 2 + (py - frame.cy) ** 2, target = (y * size + x2) * 4;
+        if (distance2 < radius ** 2 || backed && distance2 > backRadius ** 2) continue;
+        if (backed) {
+          image.data.set(this.mode === "original" ? originalBase : palette[0], target);
+          image.data[target + 3] = 255;
+        }
+        if (px < 0 || py < 0 || px >= n || py >= n) continue;
+        const pixel = Math.floor(py) * n + Math.floor(px), source = pixel * 4;
+        if (this.mode === "original") {
+          if (backed) {
+            const alpha = rgba[source + 3] / 255;
+            for (let k = 0; k < 3; k++) image.data[target + k] = rgba[source + k] * alpha + originalBase[k] * (1 - alpha);
+          } else image.data.set(rgba.subarray(source, source + 4), target);
+        } else if (rgba[source + 3] >= 128) {
           image.data.set(palette[mapped.indices[paint.map[pixel]]], target);
           image.data[target + 3] = 255;
         }
@@ -5352,6 +5395,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   var lastDownloadKey = null;
   var exportController = null;
   var applyingHistory = false;
+  var backingViewCache = null;
   var previewMode = "design";
   var meshView = null;
   var loadedMeshKey = null;
@@ -5374,7 +5418,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return settings.design === "custom" && settings.svgDetail === "artwork";
   }
   function geometryKey(settings = state) {
-    return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? settings.hourStyle : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null]);
+    return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone, settings.svgBacking, settings.svgBacking ? [settings.svgBackingThickness, settings.svgBackingMargin] : null] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? settings.hourStyle : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null]);
   }
   function fileKey(settings = state) {
     return JSON.stringify([geometryKey(settings), settings.exportFormat, settings.exportFormat === "3mf" ? [colors[settings.color][1], settings.threeMFTarget, settings.threeMFTarget === "bambu-a1" ? [settings.filamentCount, settings.bambuBackColor, Object.entries(settings.bambuColors).sort()] : null] : null]);
@@ -5411,12 +5455,21 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) flushSave();
   });
+  function backingViewTransform() {
+    const key = JSON.stringify([customRevision, artworkOrientation, state.diameter, state.svgBackingMargin]);
+    if (backingViewCache?.key === key) return backingViewCache.transform;
+    const { frame, width: n } = prepareFilamentRaster(designSnapshot()), scale = frame.scale * n / 400 * 360 / state.diameter;
+    const transform = `matrix(${scale} 0 0 ${scale} ${200 - frame.cx * frame.scale * 360 / state.diameter} ${200 - frame.cy * frame.scale * 360 / state.diameter})`;
+    backingViewCache = { key, transform };
+    return transform;
+  }
   function faceMarkup() {
-    return customSVG && state.design === "custom" ? `<g transform="${placementTransform(artworkOrientation)}">${customSVG}</g>` : `<path d="${outlines.get(state.design) || outlines.get("petal")}"/>`;
+    const markup = customSVG && state.design === "custom" ? `<g transform="${placementTransform(artworkOrientation)}">${customSVG}</g>` : `<path d="${outlines.get(state.design) || outlines.get("petal")}"/>`;
+    return usesSVGBacking(state) ? `<g transform="${backingViewTransform()}">${markup}</g>` : markup;
   }
   function render({ forceInputs = false, historyGroup = null, recordHistory = true } = {}) {
-    const color = colors[state.color][1], detailed = originalArtwork();
-    const nextPreviewKey = JSON.stringify([state.design, state.color, state.texture, state.markers, state.hourStyle, state.numberSize, state.numberPosition, state.diameter, state.svgDetail, customRevision, artworkOrientation]);
+    const color = colors[state.color][1], detailed = originalArtwork(), backed = usesSVGBacking(state);
+    const nextPreviewKey = JSON.stringify([state.design, state.color, state.texture, state.markers, state.hourStyle, state.numberSize, state.numberPosition, state.diameter, state.svgDetail, customRevision, artworkOrientation, backed, backed ? [state.svgBackingMargin, state.hole] : null]);
     if (nextPreviewKey !== previewKey) {
       let ticks = "", numberClearance = "";
       if (state.markers && state.hourStyle !== "ticks") {
@@ -5424,15 +5477,37 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         numberClearance = `<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2 * 400 / state.diameter}" stroke-linejoin="round">${hourNumeralMarkup(state)}</g></mask>`;
       }
       if (state.markers && state.hourStyle === "ticks") for (let i2 = 0; i2 < 12; i2++) ticks += `<rect x="197.5" y="76" width="5" height="${i2 % 3 === 0 ? 17 : 10}" rx="2" transform="rotate(${i2 * 30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
+      if (backed) ticks = `<g transform="translate(200 200) scale(0.9) translate(-200 -200)">${ticks}</g>`;
       $("clockSvg").innerHTML = `<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance ? ' mask="url(#numberClearanceMask)"' : ""}>${state.texture === "ripple" ? Array.from({ length: 44 }, (_, i2) => `<circle cx="200" cy="200" r="${12 + i2 * 4}" fill="none" stroke="${i2 % 2 ? "#fff0da" : "#774832"}" stroke-opacity="${i2 % 2 ? ".18" : ".23"}" stroke-width=".8"/>`).join("") : state.texture === "grain" ? '<rect width="400" height="400" fill="url(#ridges)"/>' : ""}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g id="previewHands" style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
       if (detailed) {
         const painted = document.createElementNS("http://www.w3.org/2000/svg", "g");
         painted.id = "originalArtwork";
-        painted.setAttribute("transform", placementTransform(artworkOrientation));
+        painted.setAttribute("transform", `${backed ? backingViewTransform() + " " : ""}${placementTransform(artworkOrientation)}`);
         painted.innerHTML = customArtwork;
         const face = $("clockSvg").querySelector('g[mask="url(#faceMask)"]');
         face.innerHTML = ticks;
         face.before(painted);
+      }
+      if (backed) {
+        const svg = $("clockSvg"), ns = "http://www.w3.org/2000/svg", circle2 = document.createElementNS(ns, "circle"), mask = document.createElementNS(ns, "mask"), group = document.createElementNS(ns, "g");
+        circle2.id = "svgBackingPreview";
+        circle2.setAttribute("cx", "200");
+        circle2.setAttribute("cy", "200");
+        circle2.setAttribute("r", "180");
+        circle2.setAttribute("fill", color);
+        svg.insertBefore(circle2, svg.querySelector("defs").nextSibling);
+        mask.id = "backingShaftMask";
+        mask.setAttribute("maskUnits", "userSpaceOnUse");
+        mask.setAttribute("x", "0");
+        mask.setAttribute("y", "0");
+        mask.setAttribute("width", "400");
+        mask.setAttribute("height", "400");
+        mask.innerHTML = `<rect width="400" height="400" fill="white"/><circle cx="200" cy="200" r="${state.hole / state.diameter * 180}" fill="black"/>`;
+        svg.querySelector("defs").append(mask);
+        svg.querySelector("#numberClearanceMask g")?.setAttribute("transform", "translate(200 200) scale(0.9) translate(-200 -200)");
+        group.setAttribute("mask", "url(#backingShaftMask)");
+        for (const child of [...svg.children]) if (child.tagName.toLowerCase() !== "defs" && child.id !== "previewHands") group.append(child);
+        svg.insertBefore(group, $("previewHands"));
       }
       previewKey = nextPreviewKey;
     }
@@ -5457,7 +5532,15 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("diameter").setAttribute("aria-valuetext", `${state.diameter / 10} centimeters across`);
     $("colorName").textContent = colors[state.color][0];
     $("measure").textContent = state.diameter + " mm";
-    $("exportSize").textContent = `${state.diameter} mm across · ${state.thickness} mm base`;
+    $("exportSize").textContent = `${state.diameter} mm across · ${Number(artworkSurfaceHeight(state).toFixed(1))} mm ${backed ? "base + backing" : "base"}`;
+    $("thicknessLabelText").textContent = backed ? "Artwork thickness" : "Base thickness";
+    $("fitHint").textContent = `The threaded shaft must pass through the face and leave room for the nut.${backed ? " The backing adds " + backingDepth(state) + " mm below the artwork; include it and any relief when checking shaft length." : ""}`;
+    $("svgBacking").checked = state.svgBacking;
+    $("svgBackingOptions").hidden = !state.svgBacking;
+    for (const id of ["svgBackingThickness", "svgBackingMargin"]) {
+      $(id).value = state[id];
+      $(id + "Value").textContent = state[id];
+    }
     $("sizeHint").textContent = `${state.diameter / 10} cm across — ${state.diameter <= 160 ? "a compact clock for a shelf or desk." : state.diameter <= 220 ? "a lovely size for a desk or small wall." : "a statement piece for your wall. Check your printer’s bed size."}`;
     document.querySelectorAll("[data-size]").forEach((b) => {
       const active = Number(b.dataset.size) === state.diameter;
@@ -5485,7 +5568,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const d = designs.find((d2) => d2.id === state.design);
     $("designTitle").innerHTML = d ? `The ${d.name} Clock <span>↗</span>` : "Your Custom Clock <span>↗</span>";
     $("designDescription").textContent = d?.description || "Your own shape. Your own sense of time.";
-    $("clockObject").style.filter = `drop-shadow(3px ${Math.round(state.thickness * 1.5)}px 0 ${color} ) drop-shadow(9px 19px 12px #726b4f30)`;
+    $("clockObject").style.filter = `drop-shadow(3px ${Math.round(artworkSurfaceHeight(state) * 1.5)}px 0 ${color} ) drop-shadow(9px 19px 12px #726b4f30)`;
     if (forceInputs || document.activeElement !== $("diameterNumber") && !$("diameterNumber").dataset.editing) $("diameterNumber").value = state.diameter;
     if (forceInputs || document.activeElement !== $("projectName")) $("projectName").value = state.projectName;
     $("showHands").checked = state.showHands;
@@ -5656,9 +5739,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   $("diameterNumber").addEventListener("blur", () => {
     if (validateDimensions()) delete $("diameterNumber").dataset.editing;
   });
-  ["diameter", "thickness", "hole", "markers"].forEach((id) => $(id).addEventListener("input", () => {
+  ["diameter", "thickness", "hole", "markers", "svgBacking"].forEach((id) => $(id).addEventListener("input", () => {
     const input = $(id);
-    if (id === "markers") state[id] = input.checked;
+    if (id === "markers" || id === "svgBacking") state[id] = input.checked;
     else {
       if (id !== "diameter") input.dataset.editing = "true";
       if (!input.validity.valid || input.value === "") {
@@ -5668,7 +5751,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       state[id] = Number(input.value);
     }
     validateDimensions();
-    render({ historyGroup: id === "markers" ? null : id });
+    render({ historyGroup: ["markers", "svgBacking"].includes(id) ? null : id });
   }));
   for (const id of ["hourStyle", "exportFormat", "svgDetail", "svgTone", "threeMFTarget", "filamentCount", "bambuBackColor"]) $(id).addEventListener("change", () => {
     const value = id === "filamentCount" ? Number($(id).value) : $(id).value, allowed = { hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] }[id];
@@ -5676,7 +5759,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     state[id] = value;
     render();
   });
-  for (const id of ["numberSize", "numberPosition", "svgRelief"]) $(id).addEventListener("input", () => {
+  for (const id of ["numberSize", "numberPosition", "svgRelief", "svgBackingThickness", "svgBackingMargin"]) $(id).addEventListener("input", () => {
     if (!$(id).validity.valid) return;
     state[id] = Number($(id).value);
     render({ historyGroup: id });
@@ -5892,7 +5975,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       $("artworkSavedStatus").classList.toggle("session-only", !busy && !activeArtwork.id);
       $("useArtwork").hidden = state.design === "custom";
     }
-    for (const id of ["useArtwork", "replaceArtwork", "removeArtwork", "artRotateLeft", "artRotateRight", "artMirrorX", "artMirrorY", "artResetOrientation", "svgDetail", "svgRelief", "svgTone"]) $(id).disabled = busy;
+    for (const id of ["useArtwork", "replaceArtwork", "removeArtwork", "artRotateLeft", "artRotateRight", "artMirrorX", "artMirrorY", "artResetOrientation", "svgDetail", "svgRelief", "svgTone", "svgBacking", "svgBackingThickness", "svgBackingMargin"]) $(id).disabled = busy;
     for (const button of $("savedArtworks").querySelectorAll("button")) {
       button.disabled = deletingArtwork;
       button.classList.toggle("selected", button.dataset.artworkId === activeArtwork?.id);
@@ -6210,10 +6293,14 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("downloadNote").textContent = bambu ? "A1 · 0.4 mm nozzle. Up to 4 colors with one AMS Lite. Reopen your .clock project in Clock Factory to edit the design." : settings.exportFormat === "stl" ? "STL contains the shape and raised details. For colored SVG artwork on your A1, choose Bambu A1 · colors above." : "Standard 3MF contains a color texture. For AMS filament assignments, choose Bambu A1 · colors above.";
     toast(fileKey() === key ? "Your print file is ready. Next steps are below the download button." : `Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
   }
-  function paintHourDetails(context, settings) {
+  function paintHourDetails(context, settings, frame = null) {
     if (!settings.markers) return;
     context.save();
     context.fillStyle = "#f5e5cd";
+    if (frame && usesSVGBacking(settings)) {
+      const scale = settings.diameter / (frame.n * frame.scale);
+      context.transform(scale, 0, 0, scale, frame.cx * 400 / frame.n - 200 * scale, frame.cy * 400 / frame.n - 200 * scale);
+    }
     if (settings.hourStyle !== "ticks") {
       const svg = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${hourNumeralMarkup(settings)}</svg>`, "image/svg+xml");
       for (const path2 of svg.querySelectorAll("path")) context.fill(new Path2D(path2.getAttribute("d")), "evenodd");
@@ -6253,11 +6340,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       for (let i2 = 0; i2 < alpha.length; i2++) alpha[i2] = pixels[i2 * 4 + 3];
       let artwork = null;
       if (originalArtwork(settings)) {
-        paintHourDetails(ctx, settings);
+        const frame = artworkFrame(alpha, n, settings.diameter, settings);
+        paintHourDetails(ctx, settings, frame);
         const png = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
         jobSignal.throwIfAborted();
         if (!png) throw Error("The SVG color artwork could not be prepared.");
-        artwork = { rgba: pixels, texture: { png: new Uint8Array(await png.arrayBuffer()), frame: artworkFrame(alpha, n, settings.diameter), thickness: settings.thickness } };
+        artwork = { rgba: pixels, texture: { png: new Uint8Array(await png.arrayBuffer()), frame, thickness: artworkSurfaceHeight(settings) } };
       }
       jobSignal.throwIfAborted();
       const mesh = await meshAsync(alpha, n, { ...settings, exportFormat: "stl" }, jobSignal, null, artwork, stage);
@@ -6278,19 +6366,19 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     }
     const alpha = new Uint8Array(n * n), pixels = context.getImageData(0, 0, n, n).data;
     for (let i2 = 0; i2 < alpha.length; i2++) alpha[i2] = pixels[i2 * 4 + 3];
-    const frame = mesh?.artwork?.texture.frame || artworkFrame(alpha, n, settings.diameter);
+    const frame = mesh?.artwork?.texture.frame || artworkFrame(alpha, n, settings.diameter, settings);
     if (!originalArtwork(settings)) {
       context.globalCompositeOperation = "source-in";
       context.fillStyle = settings.faceColor;
       context.fillRect(0, 0, 400, 400);
     }
     context.globalCompositeOperation = "source-atop";
-    paintHourDetails(context, settings);
-    return { rgba: context.getImageData(0, 0, n, n).data, width: n, height: n, frame, thickness: settings.thickness };
+    paintHourDetails(context, settings, frame);
+    return { rgba: context.getImageData(0, 0, n, n).data, width: n, height: n, frame, thickness: artworkSurfaceHeight(settings) };
   }
   function updateFilamentPreview() {
     const snapshot = designSnapshot(), settings = snapshot.settings;
-    const key = JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail] : null, settings.diameter, settings.faceColor, settings.markers ? [settings.hourStyle, settings.numberSize, settings.numberPosition] : false, settings.filamentCount, settings.bambuBackColor]);
+    const key = JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgBacking, settings.svgBacking ? settings.svgBackingMargin : null] : null, settings.diameter, settings.faceColor, settings.markers ? [settings.hourStyle, settings.numberSize, settings.numberPosition] : false, settings.filamentCount, settings.bambuBackColor]);
     filamentPreview.update({ enabled: state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1", busy: importPending || restorePending || deletingArtwork, key, snapshot, overrides: state.bambuColors });
   }
   var stageMessage = (stage) => ({ outline: "Tracing the clock outline…", details: "Adding the printable details…", mesh: "Closing the print mesh…", package: "Preparing your 3MF file…", filaments: "Mapping your SVG colors to printable filaments…" })[stage] || "Checking your model…";
@@ -6315,6 +6403,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("bedStatus").textContent = !valid ? "Enter build plate dimensions from 80 to 500 mm." : !fit ? "Check the model to verify its fit on this build plate." : fit.fits ? fit.rotated ? "Fits after a quarter turn on the build plate." : "Fits on your build plate." : "This model is larger than your build plate. Reduce its size or choose a larger printer.";
     $("bedStatus").dataset.tone = valid && fit ? fit.fits ? "success" : "warning" : "neutral";
     $("fitToBed").hidden = !valid || !fit || fit.fits;
+    $("connectArtwork").hidden = state.design !== "custom" || state.svgBacking || !stats || stats.components < 2;
+    $("connectArtwork").disabled = !!checkController || importPending || restorePending || deletingArtwork;
     if (meshView) meshView.setBed(bed.width, bed.depth, fit?.fits !== false, $("meshBed").checked);
   }
   function saveBuildPlate() {
@@ -6383,6 +6473,14 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         updatePrintSummary();
       }
     }
+  };
+  $("connectArtwork").onclick = async () => {
+    if (state.design !== "custom" || checkController || importPending || restorePending || deletingArtwork) return;
+    state.svgBacking = true;
+    render({ forceInputs: true });
+    const requested = geometryKey();
+    await $("checkModel").onclick();
+    if (requested === geometryKey() && meshStore.peek(requested)?.stats.components === 1) toast("Your SVG now prints as one piece on a round backing.");
   };
   function setPreviewMode(mode) {
     previewMode = mode;

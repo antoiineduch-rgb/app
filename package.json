@@ -1,6 +1,6 @@
 {
   "name": "clock-factory",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,7 +16,8 @@
     "test:numerals-3mf": "npm run build && electron tests/numerals-3mf.electron.cjs",
     "test:svg-details": "npm run build && electron tests/svg-details.electron.cjs",
     "test:studio": "npm run build && electron tests/studio.electron.cjs",
-    "test:bambu": "npm run build && electron tests/bambu-export.electron.cjs"
+    "test:bambu": "npm run build && electron tests/bambu-export.electron.cjs",
+    "test:svg-backing": "npm run build && electron tests/svg-backing.electron.cjs"
   },
   "engines": {
     "node": ">=22.12.0"

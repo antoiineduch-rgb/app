@@ -1,5 +1,6 @@
 import {filamentPaint,dominantArtworkColor} from './bambu-paint.js';
 import {filamentColors} from './filament-colors.js';
+import {usesSVGBacking} from './svg-details.js';
 
 function analyze(painting,settings,workerURL,signal){
   return new Promise((resolve,reject)=>{
@@ -100,12 +101,19 @@ export class FilamentPreview{
     });
     const n=painting.width,size=this.canvas.width,context=this.canvas.getContext('2d'),image=context.createImageData(size,size),{frame,rgba}=painting;
     const span=snapshot.settings.diameter/frame.scale*1.08,palette=mapped.palette.map(color=>[1,3,5].map(at=>parseInt(color.slice(at,at+2),16)));
-    const radius=snapshot.settings.hole/2/frame.scale;
+    const radius=snapshot.settings.hole/2/frame.scale,backed=usesSVGBacking(snapshot.settings),backRadius=snapshot.settings.diameter/2/frame.scale;
+    const originalBase=[1,3,5].map(at=>parseInt(paint.palette[0].slice(at,at+2),16));
     for(let y=0;y<size;y++)for(let x=0;x<size;x++){
       const px=frame.cx+((x+.5)/size-.5)*span,py=frame.cy+((y+.5)/size-.5)*span;
-      if(px<0||py<0||px>=n||py>=n||(px-frame.cx)**2+(py-frame.cy)**2<radius**2)continue;
-      const pixel=Math.floor(py)*n+Math.floor(px),source=pixel*4,target=(y*size+x)*4;
-      if(this.mode==='original')image.data.set(rgba.subarray(source,source+4),target);
+      const distance=(px-frame.cx)**2+(py-frame.cy)**2,target=(y*size+x)*4;
+      if(distance<radius**2||(backed&&distance>backRadius**2))continue;
+      if(backed){image.data.set(this.mode==='original'?originalBase:palette[0],target);image.data[target+3]=255;}
+      if(px<0||py<0||px>=n||py>=n)continue;
+      const pixel=Math.floor(py)*n+Math.floor(px),source=pixel*4;
+      if(this.mode==='original'){
+        if(backed){const alpha=rgba[source+3]/255;for(let k=0;k<3;k++)image.data[target+k]=rgba[source+k]*alpha+originalBase[k]*(1-alpha);}
+        else image.data.set(rgba.subarray(source,source+4),target);
+      }
       else if(rgba[source+3]>=128){image.data.set(palette[mapped.indices[paint.map[pixel]]],target);image.data[target+3]=255;}
     }
     context.putImageData(image,0,0);

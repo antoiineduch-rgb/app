@@ -3110,6 +3110,40 @@
   }
 
   // svg-details.js
+  function usesSVGBacking(settings) {
+    return settings?.design === "custom" && settings.svgBacking === true;
+  }
+  function backingDepth(settings) {
+    if (!usesSVGBacking(settings)) return 0;
+    const value = settings.svgBackingThickness ?? 1.2;
+    if (!Number.isFinite(value) || value < 1 || value > 3) throw Error("Choose a backing thickness from 1 to 3 mm.");
+    return value;
+  }
+  function artworkSurfaceHeight(settings) {
+    return settings.thickness + backingDepth(settings);
+  }
+  function artworkFrame(alpha, n, diameter, settings = null) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const contours = traceContours(alpha, n);
+    for (const ring of contours) for (const [x2, y] of ring) {
+      minX = Math.min(minX, x2);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x2);
+      maxY = Math.max(maxY, y);
+    }
+    const span = Math.max(maxX - minX, maxY - minY);
+    if (!Number.isFinite(span) || span <= 0) throw Error("The SVG has no printable artwork.");
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    let scale = diameter / span;
+    if (usesSVGBacking(settings)) {
+      const margin = settings.svgBackingMargin ?? 3;
+      if (!Number.isFinite(margin) || margin < 1 || margin > 12 || diameter <= margin * 2) throw Error("Choose a backing border from 1 to 12 mm.");
+      let radius = 0;
+      for (const ring of contours) for (const [x2, y] of ring) radius = Math.max(radius, Math.hypot(x2 - cx, y - cy));
+      scale = (diameter / 2 - margin) / radius;
+    }
+    return { scale, cx, cy, n };
+  }
   var luminance = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
   function artworkRelief(rgba, alpha, n, mode = "contrast") {
     if (!ArrayBuffer.isView(rgba) || rgba.length !== n * n * 4 || alpha?.length !== n * n) throw Error("The SVG detail image is incomplete.");
@@ -3289,13 +3323,16 @@
   function buildClockLayers(alpha, n, settings, progress = () => {
   }, artwork = null) {
     if (!Number.isInteger(n) || n < 2 || !alpha || alpha.length !== n * n) throw Error("The outline image must be a square pixel grid.");
-    const { diameter, thickness, hole, texture, markers } = settings;
-    if (![diameter, thickness, hole].every((value) => Number.isFinite(value) && value > 0) || !["smooth", "ripple", "grain"].includes(texture)) throw Error("The clock dimensions or texture are invalid.");
+    const { diameter, hole, texture, markers } = settings, thickness = artworkSurfaceHeight(settings), backed = usesSVGBacking(settings);
+    if (![diameter, settings.thickness, thickness, hole].every((value) => Number.isFinite(value) && value > 0) || !["smooth", "ripple", "grain"].includes(texture)) throw Error("The clock dimensions or texture are invalid.");
     progress("outline");
-    const { polygons: outline, frame } = silhouette(alpha, n, diameter);
+    const { polygons: outline, frame } = silhouette(alpha, n, diameter, backed ? artworkFrame(alpha, n, diameter, settings) : null);
     const base = import_polygon_clipping3.default.difference(outline, [[circle(hole / 2, 1e-3, 128)]]);
     if (!base.length) throw Error("The center opening covers the entire clock face.");
-    const layers = [{ height: thickness, polygons: base }];
+    const layers = backed ? [
+      { height: backingDepth(settings), polygons: import_polygon_clipping3.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[circle(hole / 2, 1e-3, 128)]]) },
+      { height: thickness, polygons: base }
+    ] : [{ height: thickness, polygons: base }];
     progress("details");
     const detailed = !!artwork?.rgba && settings.design === "custom" && settings.svgDetail !== "silhouette";
     if (texture === "smooth" && !markers && !detailed) return layers;
@@ -4258,7 +4295,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   var hex2 = (color) => "#" + color.map((value) => Math.round(value).toString(16).padStart(2, "0")).join("").toUpperCase();
   var distance = (a, b) => 0.2126 * (a[0] - b[0]) ** 2 + 0.7152 * (a[1] - b[1]) ** 2 + 0.0722 * (a[2] - b[2]) ** 2;
   var bin = (r, g, b) => (r >> 3) * 1024 + (g >> 3) * 32 + (b >> 3);
-  function composite(data, at, base) {
+  function composite(data, at, base, opaqueBins) {
+    if (data[at + 3] < 240 && opaqueBins?.[bin(data[at], data[at + 1], data[at + 2])]) return [data[at], data[at + 1], data[at + 2]];
     const a = data[at + 3] / 255;
     return [0, 1, 2].map((k) => Math.round(data[at + k] * a + base[k] * (1 - a)));
   }
@@ -4283,10 +4321,16 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     if (!raster) return { palette: [hex2(base)], map: null, mips: null };
     const { rgba, width, height } = raster;
     if (!(rgba instanceof Uint8Array || rgba instanceof Uint8ClampedArray) || !Number.isInteger(width) || width < 2 || width > 2048 || height !== width || rgba.length !== width * height * 4) throw Error("The SVG filament-color image is incomplete.");
-    const counts2 = new Uint32Array(32768), sums = [new Float64Array(32768), new Float64Array(32768), new Float64Array(32768)];
+    const counts2 = new Uint32Array(32768), opaqueBins = new Uint8Array(32768), sums = [new Float64Array(32768), new Float64Array(32768), new Float64Array(32768)];
+    for (let at = 0; at < rgba.length; at += 4) if (rgba[at + 3] >= 240) opaqueBins[bin(rgba[at], rgba[at + 1], rgba[at + 2])] = 1;
+    const originalBins = opaqueBins.slice();
+    for (let key = 0; key < originalBins.length; key++) if (originalBins[key]) {
+      const r = key >> 10, g = key >> 5 & 31, b = key & 31;
+      for (let dr = -1; dr <= 1; dr++) for (let dg = -1; dg <= 1; dg++) for (let db = -1; db <= 1; db++) if (r + dr >= 0 && r + dr < 32 && g + dg >= 0 && g + dg < 32 && b + db >= 0 && b + db < 32) opaqueBins[(r + dr) * 1024 + (g + dg) * 32 + b + db] = 1;
+    }
     let total = 0;
     for (let at = 0; at < rgba.length; at += 4) if (rgba[at + 3] >= 128) {
-      const color = composite(rgba, at, base), key = bin(...color);
+      const color = composite(rgba, at, base, opaqueBins), key = bin(...color);
       counts2[key]++;
       total++;
       for (let k = 0; k < 3; k++) sums[k][key] += color[k];
@@ -4337,7 +4381,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const palette = colors.map(hex2), lookup = new Uint8Array(32768);
     for (const sample of samples) lookup[sample.key] = nearest(sample.color, colors);
     const map = new Uint8Array(width * height);
-    for (let i2 = 0; i2 < map.length; i2++) if (rgba[i2 * 4 + 3] >= 128) map[i2] = lookup[bin(...composite(rgba, i2 * 4, base))];
+    for (let i2 = 0; i2 < map.length; i2++) if (rgba[i2 * 4 + 3] >= 128) map[i2] = lookup[bin(...composite(rgba, i2 * 4, base, opaqueBins))];
     return { palette, map, mips: paintMips(map, width), width };
   }
   function paintMips(map, width) {

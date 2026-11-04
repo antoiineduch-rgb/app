@@ -124,3 +124,12 @@ select:focus-visible{outline:3px solid #9eb48a;outline-offset:3px}
 .filament-preview[data-ready="false"] .filament-proof-note{border-top:0;padding-top:0}
 #filamentProofRetry{margin-top:5px}
 @media(max-width:700px){.filament-preview{padding:14px}.filament-proof-heading h3{font-size:13px}.filament-proof-heading .tool-button{font-size:10px;padding:8px}.filament-proof-heading p,.filament-editing>p,.filament-proof-note{font-size:11px}.filament-editor{gap:8px;grid-template-columns:minmax(86px,1fr) 44px minmax(78px,.8fr)}.filament-proof-modes button{min-height:40px}.filament-proof-figure{max-width:190px}}
+
+.svg-backing-controls{border-top:1px solid #dfe6d7;margin-top:16px;padding-top:5px}
+.svg-backing-controls .toggle-row{margin-top:7px}
+#svgBackingOptions>.helper{margin:9px 0 16px}
+#svgBackingOptions .label-row{margin-top:13px;margin-bottom:10px;font-size:11px}
+#svgBackingOptions .label-row>span{font-size:11px}
+.dimension-row label>#thicknessLabelText{position:static;color:inherit;font:inherit}
+.print-check>#connectArtwork{display:block;white-space:normal;min-height:44px;margin-top:12px;background:#eaf0e0;border-color:#a6ba90;color:#3d592e}
+@media(max-width:700px){.print-check>#connectArtwork{width:100%}.svg-backing-controls .toggle-row{font-size:12px}}

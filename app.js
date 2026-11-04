@@ -6,7 +6,7 @@ import { makeClockSTL } from './mesh.js';
 import { hourNumeralMarkup } from './hour-numerals.js';
 import { stlTo3MF } from './export-3mf.js';
 import { stlToBambu3MF } from './export-bambu.js';
-import { artworkFrame } from './svg-details.js';
+import { artworkFrame,usesSVGBacking,backingDepth,artworkSurfaceHeight } from './svg-details.js';
 import { DEFAULT_SETTINGS,normalizeSettings,projectName,parseProject,serializeProject,projectFilename,MAX_PROJECT_BYTES } from './project.js';
 import { DesignHistory } from './history.js';
 import { MeshStore } from './mesh-store.js';
@@ -34,12 +34,12 @@ const outlines=new Map(designs.map(d=>[d.id,shapePath(d.id)]));
 const workerURL=new URL('./export-worker.js',document.currentScript?.src||location.href);
 const meshViewURL=new URL('./mesh-view.js',document.currentScript?.src||location.href);
 const history=new DesignHistory(),meshStore=new MeshStore(2);
-let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null,applyingHistory=false;
+let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null,applyingHistory=false,backingViewCache=null;
 let previewMode='design',meshView=null,loadedMeshKey=null,meshPreviewKey=null,meshPreviewController=null,meshPreviewTimer=null,checkController=null,checkKey=null;
 let bed={width:220,depth:220},bedPreset='custom';
 try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500)){bed={width:saved.width,depth:saved.depth};if(saved.preset==='a1'&&saved.width===256&&saved.depth===256)bedPreset='a1';}}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
-function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null]);}
+function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone,settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null]);}
 function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[colors[settings.color][1],settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor,Object.entries(settings.bambuColors).sort()]:null]:null]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
 function updateSaveLabel(){
@@ -58,20 +58,38 @@ function flushSave(){
 function persist(){clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,200);}
 window.addEventListener('pagehide',flushSave);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)flushSave();});
-function faceMarkup(){return customSVG&&state.design==='custom'?`<g transform="${placementTransform(artworkOrientation)}">${customSVG}</g>`:`<path d="${outlines.get(state.design)||outlines.get('petal')}"/>`;}
+function backingViewTransform(){
+  const key=JSON.stringify([customRevision,artworkOrientation,state.diameter,state.svgBackingMargin]);
+  if(backingViewCache?.key===key)return backingViewCache.transform;
+  const {frame,width:n}=prepareFilamentRaster(designSnapshot()),scale=frame.scale*n/400*360/state.diameter;
+  const transform=`matrix(${scale} 0 0 ${scale} ${200-frame.cx*frame.scale*360/state.diameter} ${200-frame.cy*frame.scale*360/state.diameter})`;
+  backingViewCache={key,transform};return transform;
+}
+function faceMarkup(){
+  const markup=customSVG&&state.design==='custom'?`<g transform="${placementTransform(artworkOrientation)}">${customSVG}</g>`:`<path d="${outlines.get(state.design)||outlines.get('petal')}"/>`;
+  return usesSVGBacking(state)?`<g transform="${backingViewTransform()}">${markup}</g>`:markup;
+}
 function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
-  const color=colors[state.color][1],detailed=originalArtwork();
-  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,state.hourStyle,state.numberSize,state.numberPosition,state.diameter,state.svgDetail,customRevision,artworkOrientation]);
+  const color=colors[state.color][1],detailed=originalArtwork(),backed=usesSVGBacking(state);
+  const nextPreviewKey=JSON.stringify([state.design,state.color,state.texture,state.markers,state.hourStyle,state.numberSize,state.numberPosition,state.diameter,state.svgDetail,customRevision,artworkOrientation,backed,backed?[state.svgBackingMargin,state.hole]:null]);
   if(nextPreviewKey!==previewKey){
   let ticks='',numberClearance='';
   if(state.markers&&state.hourStyle!=='ticks'){ticks=`<g id="hourNumerals" fill="#f5e5cd">${hourNumeralMarkup(state)}</g>`;numberClearance=`<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2*400/state.diameter}" stroke-linejoin="round">${hourNumeralMarkup(state)}</g></mask>`;}
   if(state.markers&&state.hourStyle==='ticks')for(let i=0;i<12;i++)ticks+=`<rect x="197.5" y="76" width="5" height="${i%3===0?17:10}" rx="2" transform="rotate(${i*30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
+  if(backed)ticks=`<g transform="translate(200 200) scale(0.9) translate(-200 -200)">${ticks}</g>`;
   $('clockSvg').innerHTML=`<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance?' mask="url(#numberClearanceMask)"':''}>${state.texture==='ripple'?Array.from({length:44},(_,i)=>`<circle cx="200" cy="200" r="${12+i*4}" fill="none" stroke="${i%2?'#fff0da':'#774832'}" stroke-opacity="${i%2?'.18':'.23'}" stroke-width=".8"/>`).join(''):state.texture==='grain'?'<rect width="400" height="400" fill="url(#ridges)"/>':''}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g id="previewHands" style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
   if(detailed){
     const painted=document.createElementNS('http://www.w3.org/2000/svg','g');
-    painted.id='originalArtwork';painted.setAttribute('transform',placementTransform(artworkOrientation));painted.innerHTML=customArtwork;
+    painted.id='originalArtwork';painted.setAttribute('transform',`${backed?backingViewTransform()+' ':''}${placementTransform(artworkOrientation)}`);painted.innerHTML=customArtwork;
     const face=$('clockSvg').querySelector('g[mask="url(#faceMask)"]');
     face.innerHTML=ticks;face.before(painted);
+  }
+  if(backed){
+    const svg=$('clockSvg'),ns='http://www.w3.org/2000/svg',circle=document.createElementNS(ns,'circle'),mask=document.createElementNS(ns,'mask'),group=document.createElementNS(ns,'g');
+    circle.id='svgBackingPreview';circle.setAttribute('cx','200');circle.setAttribute('cy','200');circle.setAttribute('r','180');circle.setAttribute('fill',color);svg.insertBefore(circle,svg.querySelector('defs').nextSibling);
+    mask.id='backingShaftMask';mask.setAttribute('maskUnits','userSpaceOnUse');mask.setAttribute('x','0');mask.setAttribute('y','0');mask.setAttribute('width','400');mask.setAttribute('height','400');mask.innerHTML=`<rect width="400" height="400" fill="white"/><circle cx="200" cy="200" r="${state.hole/state.diameter*180}" fill="black"/>`;svg.querySelector('defs').append(mask);
+    svg.querySelector('#numberClearanceMask g')?.setAttribute('transform','translate(200 200) scale(0.9) translate(-200 -200)');
+    group.setAttribute('mask','url(#backingShaftMask)');for(const child of [...svg.children])if(child.tagName.toLowerCase()!=='defs'&&child.id!=='previewHands')group.append(child);svg.insertBefore(group,$('previewHands'));
   }
   previewKey=nextPreviewKey;
   }
@@ -84,7 +102,11 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
     else if(forceInputs||id==='diameter'||(document.activeElement!==input&&!input.dataset.editing))input.value=state[id];
   });
   $('diameterValue').textContent=state.diameter;$('diameter').setAttribute('aria-valuetext',`${state.diameter/10} centimeters across`);$('colorName').textContent=colors[state.color][0];$('measure').textContent=state.diameter+' mm';
-  $('exportSize').textContent=`${state.diameter} mm across · ${state.thickness} mm base`;
+  $('exportSize').textContent=`${state.diameter} mm across · ${Number(artworkSurfaceHeight(state).toFixed(1))} mm ${backed?'base + backing':'base'}`;
+  $('thicknessLabelText').textContent=backed?'Artwork thickness':'Base thickness';
+  $('fitHint').textContent=`The threaded shaft must pass through the face and leave room for the nut.${backed?' The backing adds '+backingDepth(state)+' mm below the artwork; include it and any relief when checking shaft length.':''}`;
+  $('svgBacking').checked=state.svgBacking;$('svgBackingOptions').hidden=!state.svgBacking;
+  for(const id of ['svgBackingThickness','svgBackingMargin']){$(id).value=state[id];$(id+'Value').textContent=state[id];}
   $('sizeHint').textContent=`${state.diameter/10} cm across — ${state.diameter<=160?'a compact clock for a shelf or desk.':state.diameter<=220?'a lovely size for a desk or small wall.':'a statement piece for your wall. Check your printer’s bed size.'}`;
   document.querySelectorAll('[data-size]').forEach(b=>{const active=Number(b.dataset.size)===state.diameter;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',active);});
   $('downloadGuide').hidden=lastDownloadKey!==fileKey();
@@ -100,7 +122,7 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   const d=designs.find(d=>d.id===state.design);
   $('designTitle').innerHTML=d?`The ${d.name} Clock <span>↗</span>`:'Your Custom Clock <span>↗</span>';
   $('designDescription').textContent=d?.description||'Your own shape. Your own sense of time.';
-  $('clockObject').style.filter=`drop-shadow(3px ${Math.round(state.thickness*1.5)}px 0 ${color} ) drop-shadow(9px 19px 12px #726b4f30)`;
+  $('clockObject').style.filter=`drop-shadow(3px ${Math.round(artworkSurfaceHeight(state)*1.5)}px 0 ${color} ) drop-shadow(9px 19px 12px #726b4f30)`;
   if(forceInputs||(document.activeElement!==$('diameterNumber')&&!$('diameterNumber').dataset.editing))$('diameterNumber').value=state.diameter;
   if(forceInputs||document.activeElement!==$('projectName'))$('projectName').value=state.projectName;
   $('showHands').checked=state.showHands;const hands=$('clockSvg').querySelector('#previewHands');if(hands)hands.toggleAttribute('hidden',!state.showHands);
@@ -168,21 +190,21 @@ $('diameterNumber').addEventListener('input',()=>{
   state.diameter=Number($('diameterNumber').value);render({historyGroup:'diameter'});
 });
 $('diameterNumber').addEventListener('blur',()=>{if(validateDimensions())delete $('diameterNumber').dataset.editing;});
-['diameter','thickness','hole','markers'].forEach(id=>$(id).addEventListener('input',()=>{
+['diameter','thickness','hole','markers','svgBacking'].forEach(id=>$(id).addEventListener('input',()=>{
   const input=$(id);
-  if(id==='markers')state[id]=input.checked;
+  if(id==='markers'||id==='svgBacking')state[id]=input.checked;
   else{
     if(id!=='diameter')input.dataset.editing='true';
     if(!input.validity.valid||input.value===''){validateDimensions();return;}
     state[id]=Number(input.value);
   }
-  validateDimensions();render({historyGroup:id==='markers'?null:id});
+  validateDimensions();render({historyGroup:['markers','svgBacking'].includes(id)?null:id});
 }));
 for(const id of ['hourStyle','exportFormat','svgDetail','svgTone','threeMFTarget','filamentCount','bambuBackColor'])$(id).addEventListener('change',()=>{
   const value=id==='filamentCount'?Number($(id).value):$(id).value,allowed={hourStyle:['ticks','arabic','roman'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light'],threeMFTarget:['bambu-a1','standard'],filamentCount:[2,4],bambuBackColor:['background','face']}[id];
   if(!allowed.includes(value))return;state[id]=value;render();
 });
-for(const id of ['numberSize','numberPosition','svgRelief'])$(id).addEventListener('input',()=>{
+for(const id of ['numberSize','numberPosition','svgRelief','svgBackingThickness','svgBackingMargin'])$(id).addEventListener('input',()=>{
   if(!$(id).validity.valid)return;state[id]=Number($(id).value);render({historyGroup:id});
 });
 function updateExportFormatUI(){
@@ -264,7 +286,7 @@ function updateArtworkUI(){
     $('artworkSavedStatus').classList.toggle('session-only',!busy&&!activeArtwork.id);
     $('useArtwork').hidden=state.design==='custom';
   }
-  for(const id of ['useArtwork','replaceArtwork','removeArtwork','artRotateLeft','artRotateRight','artMirrorX','artMirrorY','artResetOrientation','svgDetail','svgRelief','svgTone'])$(id).disabled=busy;
+  for(const id of ['useArtwork','replaceArtwork','removeArtwork','artRotateLeft','artRotateRight','artMirrorX','artMirrorY','artResetOrientation','svgDetail','svgRelief','svgTone','svgBacking','svgBackingThickness','svgBackingMargin'])$(id).disabled=busy;
   for(const button of $('savedArtworks').querySelectorAll('button')){
     button.disabled=deletingArtwork;button.classList.toggle('selected',button.dataset.artworkId===activeArtwork?.id);
   }
@@ -425,9 +447,10 @@ function downloadClock(blob,settings,key){
   $('downloadNote').textContent=bambu?'A1 · 0.4 mm nozzle. Up to 4 colors with one AMS Lite. Reopen your .clock project in Clock Factory to edit the design.':settings.exportFormat==='stl'?'STL contains the shape and raised details. For colored SVG artwork on your A1, choose Bambu A1 · colors above.':'Standard 3MF contains a color texture. For AMS filament assignments, choose Bambu A1 · colors above.';
   toast(fileKey()===key?'Your print file is ready. Next steps are below the download button.':`Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
 }
-function paintHourDetails(context,settings){
+function paintHourDetails(context,settings,frame=null){
   if(!settings.markers)return;
   context.save();context.fillStyle='#f5e5cd';
+  if(frame&&usesSVGBacking(settings)){const scale=settings.diameter/(frame.n*frame.scale);context.transform(scale,0,0,scale,frame.cx*400/frame.n-200*scale,frame.cy*400/frame.n-200*scale);}
   if(settings.hourStyle!=='ticks'){
     const svg=new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${hourNumeralMarkup(settings)}</svg>`,'image/svg+xml');
     for(const path of svg.querySelectorAll('path'))context.fill(new Path2D(path.getAttribute('d')),'evenodd');
@@ -450,10 +473,10 @@ async function ensureMesh(snapshot,signal,onStage=()=>{}){
     for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
     let artwork=null;
     if(originalArtwork(settings)){
-      paintHourDetails(ctx,settings);
+      const frame=artworkFrame(alpha,n,settings.diameter,settings);paintHourDetails(ctx,settings,frame);
       const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));jobSignal.throwIfAborted();
       if(!png)throw Error('The SVG color artwork could not be prepared.');
-      artwork={rgba:pixels,texture:{png:new Uint8Array(await png.arrayBuffer()),frame:artworkFrame(alpha,n,settings.diameter),thickness:settings.thickness}};
+      artwork={rgba:pixels,texture:{png:new Uint8Array(await png.arrayBuffer()),frame,thickness:artworkSurfaceHeight(settings)}};
     }
     jobSignal.throwIfAborted();
     const mesh=await meshAsync(alpha,n,{...settings,exportFormat:'stl'},jobSignal,null,artwork,stage);
@@ -467,15 +490,15 @@ function prepareFilamentRaster(snapshot,mesh){
   if(settings.design==='custom')drawPlacedArtwork(context,image,placement);else{context.fillStyle='#fff';context.fill(new Path2D(outlines.get(settings.design)));}
   const alpha=new Uint8Array(n*n),pixels=context.getImageData(0,0,n,n).data;
   for(let i=0;i<alpha.length;i++)alpha[i]=pixels[i*4+3];
-  const frame=mesh?.artwork?.texture.frame||artworkFrame(alpha,n,settings.diameter);
+  const frame=mesh?.artwork?.texture.frame||artworkFrame(alpha,n,settings.diameter,settings);
   if(!originalArtwork(settings)){context.globalCompositeOperation='source-in';context.fillStyle=settings.faceColor;context.fillRect(0,0,400,400);}
-  context.globalCompositeOperation='source-atop';paintHourDetails(context,settings);
-  return {rgba:context.getImageData(0,0,n,n).data,width:n,height:n,frame,thickness:settings.thickness};
+  context.globalCompositeOperation='source-atop';paintHourDetails(context,settings,frame);
+  return {rgba:context.getImageData(0,0,n,n).data,width:n,height:n,frame,thickness:artworkSurfaceHeight(settings)};
 }
 function updateFilamentPreview(){
   const snapshot=designSnapshot(),settings=snapshot.settings;
   // Relief, thickness, hole size and recoloring do not change SVG quantization.
-  const key=JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail]:null,settings.diameter,settings.faceColor,settings.markers?[settings.hourStyle,settings.numberSize,settings.numberPosition]:false,settings.filamentCount,settings.bambuBackColor]);
+  const key=JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgBacking,settings.svgBacking?settings.svgBackingMargin:null]:null,settings.diameter,settings.faceColor,settings.markers?[settings.hourStyle,settings.numberSize,settings.numberPosition]:false,settings.filamentCount,settings.bambuBackColor]);
   filamentPreview.update({enabled:state.exportFormat==='3mf'&&state.threeMFTarget==='bambu-a1',busy:importPending||restorePending||deletingArtwork,key,snapshot,overrides:state.bambuColors});
 }
 const stageMessage=stage=>({outline:'Tracing the clock outline…',details:'Adding the printable details…',mesh:'Closing the print mesh…',package:'Preparing your 3MF file…',filaments:'Mapping your SVG colors to printable filaments…'}[stage]||'Checking your model…');
@@ -496,6 +519,7 @@ function updatePrintSummary(){
   $('bedStatus').textContent=!valid?'Enter build plate dimensions from 80 to 500 mm.':!fit?'Check the model to verify its fit on this build plate.':fit.fits?(fit.rotated?'Fits after a quarter turn on the build plate.':'Fits on your build plate.'): 'This model is larger than your build plate. Reduce its size or choose a larger printer.';
   $('bedStatus').dataset.tone=valid&&fit?(fit.fits?'success':'warning'):'neutral';
   $('fitToBed').hidden=!valid||!fit||fit.fits;
+  $('connectArtwork').hidden=state.design!=='custom'||state.svgBacking||!stats||stats.components<2;$('connectArtwork').disabled=!!checkController||importPending||restorePending||deletingArtwork;
   if(meshView)meshView.setBed(bed.width,bed.depth,fit?.fits!==false,$('meshBed').checked);
 }
 function saveBuildPlate(){try{localStorage.setItem('clock-factory-bed',JSON.stringify({...bed,preset:bedPreset}));}catch{}}
@@ -532,6 +556,11 @@ $('checkModel').onclick=async()=>{
   try{await ensureMesh(snapshot,controller.signal,stage=>{if(snapshot.geometry===geometryKey())$('printCheckStatus').textContent=stageMessage(stage);});}
   catch(error){if(error.name!=='AbortError')toast('Could not check model: '+error.message);}
   finally{if(checkController===controller){checkController=null;$('checkModel').disabled=false;$('checkModel').textContent='Check model';updatePrintSummary();}}
+};
+$('connectArtwork').onclick=async()=>{
+  if(state.design!=='custom'||checkController||importPending||restorePending||deletingArtwork)return;
+  state.svgBacking=true;render({forceInputs:true});const requested=geometryKey();await $('checkModel').onclick();
+  if(requested===geometryKey()&&meshStore.peek(requested)?.stats.components===1)toast('Your SVG now prints as one piece on a round backing.');
 };
 function setPreviewMode(mode){
   previewMode=mode;

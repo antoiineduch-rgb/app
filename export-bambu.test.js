@@ -83,3 +83,13 @@ test('chosen spool colors merge matching regions into one actual painted filamen
   assert.deepEqual(triangles(recolored['3D/3dmodel.model']).map(t=>t.indices),triangles(original['3D/3dmodel.model']).map(t=>t.indices));
   assert.throws(()=>stlToBambu3MF(mesh(),{colorOverrides:{'#FF0000':'bad'}}),/filament colors/i);
 });
+test('antialiased transparent edges reuse solid filaments while distinct translucent fills keep their blended color',()=>{
+  const raster=image();for(let x=0;x<80;x++)raster.rgba[x*4+3]=128;
+  const paint=filamentPaint(raster,'#008000',4);assert.equal(paint.palette.length,3);assert.deepEqual(new Set(paint.palette),new Set(['#008000','#FF0000','#0000FF']));
+  assert.equal(paint.palette[paint.map[4]],'#FF0000');
+  for(let at=0;at<raster.rgba.length;at+=4){const red=(at/4)%80<40;raster.rgba.set(red?[229,57,53,255]:[40,85,214,255],at);}
+  for(let x=0;x<80;x++)raster.rgba.set(x<40?[228,55,52,131]:[39,84,213,140],x*4);
+  const rounded=filamentPaint(raster,'#485C48',4);assert.deepEqual(new Set(rounded.palette),new Set(['#485C48','#E53935','#2855D6']));
+  for(let at=0;at<raster.rgba.length;at+=4)raster.rgba.set([0,0,255,128],at);
+  const translucent=filamentPaint(raster,'#008000',4);assert.ok(translucent.palette.includes('#004080'));
+});
