@@ -48,3 +48,8 @@ test('optional SVG backing settings survive projects and default to off for old 
   assert.equal(parseProject(JSON.stringify(legacy)).settings.svgBacking,false);
   for(const patch of [{svgBacking:'true'},{svgBackingThickness:.5},{svgBackingMargin:30}])assert.throws(()=>parseProject(JSON.stringify({...legacy,settings:{...legacy.settings,...patch}})),/project/);
 });
+test('calibrated center holes retain 0.1 mm precision in local settings and portable projects',()=>{
+  const settings={...DEFAULT_SETTINGS,hole:7.8};assert.equal(parseProject(serializeProject(settings)).settings.hole,7.8);
+  assert.equal(normalizeSettings({hole:8}).hole,8);assert.equal(normalizeSettings({hole:8.24}).hole,8.2);
+  const invalid=JSON.parse(serializeProject(settings));invalid.settings.hole=8.25;assert.throws(()=>parseProject(JSON.stringify(invalid)),/invalid hole/);
+});

@@ -55,6 +55,9 @@ jobs:
       - name: Test connected SVG backings and their print files
         run: npm run test:svg-backing
 
+      - name: Test hole-fit strips, calibrated clock holes, and native downloads
+        run: npm run test:hole-fit
+
       - name: Build Windows installer
         run: npm run dist:win
 

@@ -3284,6 +3284,9 @@
       return [snap2(radius * Math.cos(a)), snap2(radius * Math.sin(a))];
     });
   }
+  function shaftOpening(diameter) {
+    return circle(diameter / 2, 1e-3, 128);
+  }
   function markerPolygons(diameter, padding = 0) {
     const result = [];
     for (let i2 = 0; i2 < 12; i2++) {
@@ -3327,10 +3330,10 @@
     if (![diameter, settings.thickness, thickness, hole].every((value) => Number.isFinite(value) && value > 0) || !["smooth", "ripple", "grain"].includes(texture)) throw Error("The clock dimensions or texture are invalid.");
     progress("outline");
     const { polygons: outline, frame } = silhouette(alpha, n, diameter, backed ? artworkFrame(alpha, n, diameter, settings) : null);
-    const base = import_polygon_clipping3.default.difference(outline, [[circle(hole / 2, 1e-3, 128)]]);
+    const opening = shaftOpening(hole), base = import_polygon_clipping3.default.difference(outline, [[opening]]);
     if (!base.length) throw Error("The center opening covers the entire clock face.");
     const layers = backed ? [
-      { height: backingDepth(settings), polygons: import_polygon_clipping3.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[circle(hole / 2, 1e-3, 128)]]) },
+      { height: backingDepth(settings), polygons: import_polygon_clipping3.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
       { height: thickness, polygons: base }
     ] : [{ height: thickness, polygons: base }];
     progress("details");
@@ -4488,10 +4491,56 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return { buffer: zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength), palette: paint.palette };
   }
 
+  // hole-fit.js
+  var import_polygon_clipping4 = __toESM(require_polygon_clipping_umd(), 1);
+  var round = (value) => Math.round(value * 1e6) / 1e6;
+  var DIGITS = ["abcdef", "bc", "abdeg", "abcdg", "bcfg", "acdfg", "acdefg", "abc", "abcdefg", "abcdfg"];
+  var SEGMENTS = { a: [0.25, 3.6, 2.25, 4.2], b: [1.9, 1.9, 2.5, 4], c: [1.9, 0.2, 2.5, 2.3], d: [0.25, 0, 2.25, 0.6], e: [0, 0.2, 0.6, 2.3], f: [0, 1.9, 0.6, 4], g: [0.25, 1.8, 2.25, 2.4] };
+  function labelPolygons(text, x2, y) {
+    const width = [...text].reduce((sum, c) => sum + (c === "." ? 0.7 : 2.5) + 0.8, 0) - 0.8, rectangles = [];
+    let offset = -width / 2;
+    for (const char of text) {
+      const segments = char === "." ? [[0, 0, 0.7, 0.7]] : [...DIGITS[Number(char)]].map((id) => SEGMENTS[id]);
+      for (const [x0, y0, x1, y1] of segments) {
+        const a = round(x2 + offset + x0), b = round(x2 + offset + x1), c = round(y - 2.1 + y0), d = round(y - 2.1 + y1);
+        rectangles.push([[[a, c], [b, c], [b, d], [a, d], [a, c]]]);
+      }
+      offset += (char === "." ? 0.7 : 2.5) + 0.8;
+    }
+    return import_polygon_clipping4.default.union(...rectangles);
+  }
+  function roundedRectangle(width, height) {
+    const radius = 3, ring = [];
+    for (const [x2, y, start] of [[width / 2 - radius, height / 2 - radius, 0], [-width / 2 + radius, height / 2 - radius, 90], [-width / 2 + radius, -height / 2 + radius, 180], [width / 2 - radius, -height / 2 + radius, 270]]) for (let i2 = 0; i2 <= 16; i2++) {
+      const angle = (start + i2 * 90 / 16) * Math.PI / 180;
+      ring.push([round(x2 + radius * Math.cos(angle)), round(y + radius * Math.sin(angle))]);
+    }
+    return [...ring, ring[0]];
+  }
+  function fitTestPlan(center) {
+    if (!Number.isFinite(center) || center < 5 || center > 15 || Math.abs(center * 10 - Math.round(center * 10)) > 1e-6) throw Error("Choose a center hole from 5 to 15 mm, in steps of 0.1 mm.");
+    const value = Math.round(center * 10), parity = value % 2, first = Math.max(50 + parity, Math.min(142 - parity, value - 4));
+    const sizes = Array.from({ length: 5 }, (_, i2) => (first + i2 * 2) / 10), largest = sizes.at(-1), cell = largest + 6, width = round(cell * 5 + 8), depth = round(largest + 14), thickness = 2, relief = 0.6;
+    const holes = sizes.map((diameter, i2) => ({ diameter, x: round(-width / 2 + 4 + cell * (i2 + 0.5)), y: 3.5 }));
+    const outline = roundedRectangle(width, depth), openings = holes.map(({ diameter, x: x2, y }) => [shaftOpening(diameter).map(([px, py]) => [round(px + x2), round(py + y)])]);
+    const base = import_polygon_clipping4.default.difference([[outline]], ...openings);
+    const labels = holes.map(({ diameter, x: x2 }) => ({ text: diameter.toFixed(1), polygons: labelPolygons(diameter.toFixed(1), x2, -depth / 2 + 4) }));
+    return { center, sizes, width, depth, thickness, relief, holes, base, labels };
+  }
+  function makeFitTestSTL(center) {
+    const plan = fitTestPlan(center), letters = import_polygon_clipping4.default.union(...plan.labels.map((label) => label.polygons));
+    return extrudeLayers([{ height: plan.thickness, polygons: plan.base }, { height: plan.thickness + plan.relief, polygons: letters }]);
+  }
+
   // export-worker-source.js
   self.onmessage = ({ data }) => {
     const { id, alpha, n, settings, stlBuffer, artwork } = data;
     try {
+      if (data.operation === "fit-test") {
+        const buffer = makeFitTestSTL(data.center);
+        self.postMessage({ id, buffer }, [buffer]);
+        return;
+      }
       if (data.operation === "filament-proof") {
         const base = settings.bambuBackColor === "background" ? dominantArtworkColor(artwork.painting, settings.faceColor) : settings.faceColor;
         const paint = filamentPaint(artwork.painting, base, settings.filamentCount);

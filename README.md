@@ -20,6 +20,12 @@ Undo/redo stores up to 60 design states, including imported artwork and reset op
 
 Set the diameter from 100 to 300 mm in 1 mm steps using the slider or exact-size field. **Show hands** controls the illustrative hands in Design view; they never appear in print files. The welcome card can be dismissed, tabs support arrow-key navigation, and the workspace adapts to mobile screens.
 
+Center holes accept 5–15 mm in **0.1 mm** steps. Under **Clock mechanism & thickness**, choose **Print a small hole-fit test** to download a compact strip with five through-holes spaced 0.2 mm apart near the current size. The current size is always included, including at the range limits. Raised decimal labels share their geometry with the strip preview, and each opening uses the same analytic contour as the clock's shaft hole. The strip has a 2 mm base and 0.6 mm raised labels; it is one closed piece with a flat back.
+
+Print the strip using the clock's material and slicer settings, try the movement's threaded shaft, then click the matching size to apply it to the clock. This changes the hole and supports undo and project/local restoration. The last prepared strip retains its original sizes for repeat downloads; **New test around…** explicitly prepares another set. The test does not build the full clock or change its design, selected export format, artwork or colors. Downloads are named `clock-factory-fit-test-8.0mm.stl` (with the chosen center value) and support native Windows Save As. Closing or cancelling a pending test stops its worker. A local fallback is available when workers are blocked.
+
+The fit dialog also shows measured model height when a mesh is ready, or a clearly labeled upper bound based on the current settings. Backing and relief are included. This helps with shaft-length planning; the threaded section also needs room for the washer and nut. The diameter-fit strip itself is always 2 mm thick before its raised labels.
+
 The print area starts with two choices: **One-color print** prepares an STL, and **Bambu A1 · colors** prepares a native color 3MF and selects the A1's 256 × 256 mm build plate. **More export options** keeps the format, standard textured 3MF alternative, color limit, and back color available without crowding the main workflow. The A1 build-plate preset can also be chosen independently of the file format; custom dimensions stay editable and the selected plate is remembered on this device. An oversized model's **Make it fit** action remains visible while the plate details are collapsed.
 
 **See your print colors** appears when Bambu export is selected. Its front-view color layout uses the same full-resolution artwork raster and color-reduction algorithm as the exporter, before any mesh is built. Compare **Original** and **Print colors**, change the color pickers to match your spools, or **Reset colors** to return to the SVG palette. Identical chosen colors merge into one exported filament, including native painted-facet indices. This is a color layout preview; use Print mesh for relief and shape inspection, and the slicer for toolpath checks. Paint boundaries are approximate at the printer's resolution.
@@ -46,8 +52,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.8.0-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.8.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.9.0-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.9.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
@@ -102,5 +108,7 @@ Run `npm run test:studio` for project round-trips and native downloads, undo/red
 Run `npm run test:bambu` for real desktop A1 exports, all four source colors, native sub-facet paint, exact STL geometry, color limits, back-color choices, and worker fallback. It also compares actual color-preview pixels with exported palettes, checks merged filament assignments, undo/reset/project restoration, analysis reuse, superseded jobs, and usable color pickers at 320 and 390 pixels. On display-free Linux use the same headless flags as the other SVG suites.
 
 Run `npm run test:svg-backing` for a genuinely disconnected SVG, one-click repair into one closed solid, exact dimensions and an open shaft hole, matching STL/3MF geometry, backing filament assignment, actual colored 3D pixels, support/border adjustments, undo, project and local restoration, and mobile layout. It uses the same software WebGL headless setup as `test:studio`.
+
+Run `npm run test:hole-fit` for actual fit-strip downloads, applying a tested opening to a real clock 3MF, preserving the original printed strip on repeat downloads, undo and project restoration, worker fallback, cancellation without late downloads, mobile touch targets, and native desktop Save As. Unit tests generate and independently check closed meshes across all 101 supported center-hole values.
 
 For an independent consumer check, install Bambu Studio locally and run `node tests/bambu-reference.cjs /path/to/bambu-studio exported-bambu-a1.3mf`. This opens and saves the file in an isolated temporary profile, then asserts that Studio preserved every palette color and every painted facet/subdivision tree. It never slices, uploads, or prints. The A1 export was checked this way with official Bambu Studio 2.9.1.70.

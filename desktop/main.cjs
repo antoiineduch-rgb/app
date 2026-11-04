@@ -73,10 +73,11 @@ if (!app.requestSingleInstanceLock()) {
         event.preventDefault();
         return;
       }
+      const fitTest=extension==='stl'&&item.getFilename().startsWith('clock-factory-fit-test-');
       item.setSaveDialogOptions({
-        title: extension==='clock'?'Save Clock Factory project':'Save your clock face',
+        title: extension==='clock'?'Save Clock Factory project':fitTest?'Save hole-fit test':'Save your clock face',
         defaultPath: join(app.getPath('downloads'), item.getFilename()),
-        filters: [{ name: extension==='clock'?'Clock Factory project':extension==='3mf'?'3MF clock model':'STL clock mesh', extensions: [extension] }],
+        filters: [{ name: extension==='clock'?'Clock Factory project':extension==='3mf'?'3MF clock model':fitTest?'STL hole-fit test':'STL clock mesh', extensions: [extension] }],
       });
     });
     app.setAboutPanelOptions({

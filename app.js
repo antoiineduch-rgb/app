@@ -13,6 +13,7 @@ import { MeshStore } from './mesh-store.js';
 import { analyzeSTL,bedFit } from './mesh-analysis.js';
 import {FilamentPreview} from './filament-preview.js';
 import {normalizeFilamentOverrides} from './filament-colors.js';
+import {HoleFitDialog} from './hole-fit-ui.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial=DEFAULT_SETTINGS;
@@ -179,10 +180,11 @@ function validateDimensions(focus=false){
   $('dimensionError').hidden=!invalid||invalid.id==='diameterNumber';$('sizeError').hidden=!invalid||invalid.id!=='diameterNumber';
   if(invalid){
     const size=invalid.id==='diameterNumber';
-    $(size?'sizeError':'dimensionError').textContent=size?'Enter a diameter from 100 to 300 mm, in steps of 1 mm.':`Enter ${invalid.id==='hole'?'a center hole from 5 to 15':'a face thickness from 2 to 10'} mm, in steps of 0.5 mm.`;
+    $(size?'sizeError':'dimensionError').textContent=size?'Enter a diameter from 100 to 300 mm, in steps of 1 mm.':invalid.id==='hole'?'Enter a center hole from 5 to 15 mm, in steps of 0.1 mm.':'Enter a face thickness from 2 to 10 mm, in steps of 0.5 mm.';
     if(focus){if(!size)document.querySelector('.advanced-settings').open=true;invalid.focus();}
   }
   $('export').disabled=!!invalid||importPending||deletingArtwork||restorePending||!!exportController;
+  $('showFitTest').disabled=$('hole').value===''||!$('hole').validity.valid||importPending||deletingArtwork||restorePending||!!exportController;
   return !invalid;
 }
 $('diameterNumber').addEventListener('input',()=>{
@@ -290,7 +292,7 @@ function updateArtworkUI(){
   for(const button of $('savedArtworks').querySelectorAll('button')){
     button.disabled=deletingArtwork;button.classList.toggle('selected',button.dataset.artworkId===activeArtwork?.id);
   }
-  updateSaveLabel();updateHistoryUI();updateFilamentPreview();
+  updateSaveLabel();updateHistoryUI();updateFilamentPreview();holeFit.update();
 }
 async function refreshGallery(){
   const sequence=++gallerySequence;
@@ -520,6 +522,7 @@ function updatePrintSummary(){
   $('bedStatus').dataset.tone=valid&&fit?(fit.fits?'success':'warning'):'neutral';
   $('fitToBed').hidden=!valid||!fit||fit.fits;
   $('connectArtwork').hidden=state.design!=='custom'||state.svgBacking||!stats||stats.components<2;$('connectArtwork').disabled=!!checkController||importPending||restorePending||deletingArtwork;
+  holeFit.update();
   if(meshView)meshView.setBed(bed.width,bed.depth,fit?.fits!==false,$('meshBed').checked);
 }
 function saveBuildPlate(){try{localStorage.setItem('clock-factory-bed',JSON.stringify({...bed,preset:bedPreset}));}catch{}}
@@ -624,13 +627,14 @@ $('projectUpload').onchange=async event=>{
   }catch(error){if(sequence===importSequence)toast('Could not open project: '+error.message);}
   finally{if(sequence===importSequence){importPending=false;updateArtworkUI();persist();checkpointHistory();updateHistoryUI();updatePrintSummary();scheduleMeshPreview();}}
 };
-window.addEventListener('pagehide',()=>{meshPreviewController?.abort();checkController?.abort();meshView?.dispose();filamentPreview.dispose();});
+window.addEventListener('pagehide',()=>{meshPreviewController?.abort();checkController?.abort();meshView?.dispose();filamentPreview.dispose();holeFit.dispose();});
 $('cancelExport').onclick=()=>exportController?.abort();
 $('export').onclick=async()=>{
   if(importPending||deletingArtwork||restorePending||exportController||!validateDimensions(true))return;
   const snapshot=designSnapshot(),settings=snapshot.settings,key=fileKey(settings);
   if(exportCache?.key===key){showFilamentPalette(exportCache.palette);downloadClock(exportCache.blob,settings,key);return;}
   const controller=new AbortController();exportController=controller;
+  holeFit.update();
   const button=$('export');button.disabled=true;button.textContent='Preparing your clock…';
   $('exportProgress').hidden=false;$('printSection').setAttribute('aria-busy','true');
   $('exportStatus').textContent='Preparing your shape… You can keep designing.';
@@ -650,9 +654,14 @@ $('export').onclick=async()=>{
     else toast('Could not export: '+error.message);
   }finally{
     exportController=null;button.disabled=importPending||deletingArtwork||restorePending;updateExportFormatUI();validateDimensions();
-    $('exportProgress').hidden=true;$('printSection').setAttribute('aria-busy','false');
+    $('exportProgress').hidden=true;$('printSection').setAttribute('aria-busy','false');holeFit.update();
   }
 };
+const holeFit=new HoleFitDialog({workerURL,getHole:()=>state.hole,isBusy:()=>importPending||restorePending||deletingArtwork||!!exportController||$('hole').value===''||!$('hole').validity.valid,getHeight:()=>{
+  const stats=meshStore.peek(geometryKey())?.stats;
+  const extra=originalArtwork()?state.svgRelief+(state.markers?.8:0):Math.max(state.texture==='smooth'?0:.4,state.markers?.8:0);
+  return {value:stats?.dimensions[2]??artworkSurfaceHeight(state)+extra,measured:!!stats};
+},onSelect:hole=>{state.hole=hole;delete $('hole').dataset.editing;render();}});
 const filamentPreview=new FilamentPreview({workerURL,prepareRaster:prepareFilamentRaster,onColorChange:(source,color,final)=>{
   const overrides={...state.bambuColors};if(source===color.toUpperCase())delete overrides[source];else overrides[source]=color;
   state.bambuColors=normalizeFilamentOverrides(overrides);render({historyGroup:'filament-'+source});if(final)history.endGroup();

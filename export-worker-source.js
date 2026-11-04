@@ -3,10 +3,14 @@ import { stlTo3MF } from './export-3mf.js';
 import { analyzeSTL } from './mesh-analysis.js';
 import { stlToBambu3MF } from './export-bambu.js';
 import {filamentPaint,dominantArtworkColor} from './bambu-paint.js';
+import {makeFitTestSTL} from './hole-fit.js';
 
 self.onmessage = ({ data }) => {
   const { id, alpha, n, settings, stlBuffer, artwork } = data;
   try {
+    if(data.operation==='fit-test'){
+      const buffer=makeFitTestSTL(data.center);self.postMessage({id,buffer},[buffer]);return;
+    }
     if(data.operation==='filament-proof'){
       const base=settings.bambuBackColor==='background'?dominantArtworkColor(artwork.painting,settings.faceColor):settings.faceColor;
       const paint=filamentPaint(artwork.painting,base,settings.filamentCount);

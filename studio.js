@@ -3743,6 +3743,9 @@
       return [snap2(radius * Math.cos(a)), snap2(radius * Math.sin(a))];
     });
   }
+  function shaftOpening(diameter) {
+    return circle(diameter / 2, 1e-3, 128);
+  }
   function markerPolygons(diameter, padding = 0) {
     const result = [];
     for (let i2 = 0; i2 < 12; i2++) {
@@ -3786,10 +3789,10 @@
     if (![diameter, settings.thickness, thickness, hole].every((value) => Number.isFinite(value) && value > 0) || !["smooth", "ripple", "grain"].includes(texture)) throw Error("The clock dimensions or texture are invalid.");
     progress("outline");
     const { polygons: outline, frame } = silhouette(alpha, n, diameter, backed ? artworkFrame(alpha, n, diameter, settings) : null);
-    const base = import_polygon_clipping3.default.difference(outline, [[circle(hole / 2, 1e-3, 128)]]);
+    const opening = shaftOpening(hole), base = import_polygon_clipping3.default.difference(outline, [[opening]]);
     if (!base.length) throw Error("The center opening covers the entire clock face.");
     const layers = backed ? [
-      { height: backingDepth(settings), polygons: import_polygon_clipping3.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[circle(hole / 2, 1e-3, 128)]]) },
+      { height: backingDepth(settings), polygons: import_polygon_clipping3.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
       { height: thickness, polygons: base }
     ] : [{ height: thickness, polygons: base }];
     progress("details");
@@ -4898,7 +4901,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   var MAX_PROJECT_BYTES = 12 * 1024 * 1024;
   var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}), svgBacking: false, svgBackingThickness: 1.2, svgBackingMargin: 3 });
   var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] };
-  var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.5], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2], svgBackingThickness: [1, 3, 0.2], svgBackingMargin: [1, 12, 0.5] };
+  var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.1], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2], svgBackingThickness: [1, 3, 0.2], svgBackingMargin: [1, 12, 0.5] };
   var bytes = (value) => new TextEncoder().encode(value).byteLength;
   var record2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   function projectName(value) {
@@ -5345,6 +5348,217 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     }
   };
 
+  // hole-fit.js
+  var import_polygon_clipping4 = __toESM(require_polygon_clipping_umd(), 1);
+  var round = (value) => Math.round(value * 1e6) / 1e6;
+  var DIGITS = ["abcdef", "bc", "abdeg", "abcdg", "bcfg", "acdfg", "acdefg", "abc", "abcdefg", "abcdfg"];
+  var SEGMENTS = { a: [0.25, 3.6, 2.25, 4.2], b: [1.9, 1.9, 2.5, 4], c: [1.9, 0.2, 2.5, 2.3], d: [0.25, 0, 2.25, 0.6], e: [0, 0.2, 0.6, 2.3], f: [0, 1.9, 0.6, 4], g: [0.25, 1.8, 2.25, 2.4] };
+  function labelPolygons(text, x2, y) {
+    const width = [...text].reduce((sum, c) => sum + (c === "." ? 0.7 : 2.5) + 0.8, 0) - 0.8, rectangles = [];
+    let offset = -width / 2;
+    for (const char of text) {
+      const segments = char === "." ? [[0, 0, 0.7, 0.7]] : [...DIGITS[Number(char)]].map((id) => SEGMENTS[id]);
+      for (const [x0, y0, x1, y1] of segments) {
+        const a = round(x2 + offset + x0), b = round(x2 + offset + x1), c = round(y - 2.1 + y0), d = round(y - 2.1 + y1);
+        rectangles.push([[[a, c], [b, c], [b, d], [a, d], [a, c]]]);
+      }
+      offset += (char === "." ? 0.7 : 2.5) + 0.8;
+    }
+    return import_polygon_clipping4.default.union(...rectangles);
+  }
+  function roundedRectangle(width, height) {
+    const radius = 3, ring = [];
+    for (const [x2, y, start] of [[width / 2 - radius, height / 2 - radius, 0], [-width / 2 + radius, height / 2 - radius, 90], [-width / 2 + radius, -height / 2 + radius, 180], [width / 2 - radius, -height / 2 + radius, 270]]) for (let i2 = 0; i2 <= 16; i2++) {
+      const angle = (start + i2 * 90 / 16) * Math.PI / 180;
+      ring.push([round(x2 + radius * Math.cos(angle)), round(y + radius * Math.sin(angle))]);
+    }
+    return [...ring, ring[0]];
+  }
+  function fitTestPlan(center) {
+    if (!Number.isFinite(center) || center < 5 || center > 15 || Math.abs(center * 10 - Math.round(center * 10)) > 1e-6) throw Error("Choose a center hole from 5 to 15 mm, in steps of 0.1 mm.");
+    const value = Math.round(center * 10), parity = value % 2, first = Math.max(50 + parity, Math.min(142 - parity, value - 4));
+    const sizes = Array.from({ length: 5 }, (_, i2) => (first + i2 * 2) / 10), largest = sizes.at(-1), cell = largest + 6, width = round(cell * 5 + 8), depth = round(largest + 14), thickness = 2, relief = 0.6;
+    const holes = sizes.map((diameter, i2) => ({ diameter, x: round(-width / 2 + 4 + cell * (i2 + 0.5)), y: 3.5 }));
+    const outline = roundedRectangle(width, depth), openings = holes.map(({ diameter, x: x2, y }) => [shaftOpening(diameter).map(([px, py]) => [round(px + x2), round(py + y)])]);
+    const base = import_polygon_clipping4.default.difference([[outline]], ...openings);
+    const labels = holes.map(({ diameter, x: x2 }) => ({ text: diameter.toFixed(1), polygons: labelPolygons(diameter.toFixed(1), x2, -depth / 2 + 4) }));
+    return { center, sizes, width, depth, thickness, relief, holes, base, labels };
+  }
+  function makeFitTestSTL(center) {
+    const plan = fitTestPlan(center), letters = import_polygon_clipping4.default.union(...plan.labels.map((label) => label.polygons));
+    return extrudeLayers([{ height: plan.thickness, polygons: plan.base }, { height: plan.thickness + plan.relief, polygons: letters }]);
+  }
+
+  // hole-fit-ui.js
+  var paths = (polygons) => polygons.map((polygon) => polygon.map((ring) => ring.map(([x2, y], i2) => `${i2 ? "L" : "M"}${x2} ${y}`).join("") + "Z").join("")).join("");
+  function buildStrip(center, workerURL2, signal) {
+    return new Promise((resolve, reject) => {
+      let worker, timer, fallbackTimer, settled = false, fallingBack = false;
+      const finish = (error, buffer) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(fallbackTimer);
+        worker?.terminate();
+        signal.removeEventListener("abort", abort);
+        if (error) reject(error);
+        else resolve(buffer);
+      };
+      const abort = () => finish(new DOMException("Fit test cancelled", "AbortError"));
+      const fallback = () => {
+        if (settled || fallingBack) return;
+        fallingBack = true;
+        clearTimeout(timer);
+        worker?.terminate();
+        fallbackTimer = setTimeout(() => {
+          try {
+            signal.throwIfAborted();
+            finish(null, makeFitTestSTL(center));
+          } catch (error) {
+            finish(error);
+          }
+        }, 0);
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      try {
+        worker = new Worker(workerURL2, { name: "clock-fit-test" });
+        worker.onmessage = ({ data }) => {
+          if (data.id === 3) finish(data.error ? new Error(data.error) : null, data.buffer);
+        };
+        worker.onerror = (event) => {
+          event.preventDefault();
+          fallback();
+        };
+        worker.postMessage({ id: 3, operation: "fit-test", center });
+        timer = setTimeout(fallback, 6e4);
+      } catch {
+        fallback();
+      }
+    });
+  }
+  var HoleFitDialog = class {
+    constructor({ workerURL: workerURL2, getHole, isBusy, getHeight, onSelect }) {
+      this.workerURL = workerURL2;
+      this.getHole = getHole;
+      this.isBusy = isBusy;
+      this.getHeight = getHeight;
+      this.onSelect = onSelect;
+      this.dialog = document.getElementById("fitTestDialog");
+      this.openButton = document.getElementById("showFitTest");
+      this.downloadButton = document.getElementById("downloadFitTest");
+      this.newButton = document.getElementById("newFitTest");
+      this.choices = document.getElementById("fitTestChoices");
+      this.status = document.getElementById("fitTestStatus");
+      this.openButton.onclick = () => {
+        if (isBusy()) return;
+        this.controller?.abort();
+        if (!this.plan || !this.prepared) this.setPlan(getHole());
+        this.dialog.showModal();
+        this.update();
+      };
+      document.getElementById("closeFitTest").onclick = () => {
+        this.controller?.abort();
+        this.dialog.close();
+      };
+      this.dialog.addEventListener("cancel", () => this.controller?.abort());
+      this.dialog.addEventListener("close", () => {
+        if (!this.dialog.open) this.controller?.abort();
+      });
+      this.newButton.onclick = () => {
+        if (!this.pending && !isBusy()) this.setPlan(getHole());
+      };
+      this.downloadButton.onclick = () => this.download();
+      document.getElementById("cancelFitTest").onclick = () => this.controller?.abort();
+    }
+    setPlan(center) {
+      this.plan = fitTestPlan(center);
+      this.buffer = null;
+      this.prepared = false;
+      const plan = this.plan, svg = document.getElementById("fitTestPreview");
+      svg.setAttribute("viewBox", `${-plan.width / 2 - 2} ${-plan.depth / 2 - 2} ${plan.width + 4} ${plan.depth + 4}`);
+      svg.setAttribute("aria-label", "Fit strip with holes " + plan.sizes.map((value) => value.toFixed(1)).join(", ") + " millimeters");
+      svg.innerHTML = `<g transform="scale(1 -1)"><path d="${paths(plan.base)}" fill="#dde5d3" fill-rule="evenodd" stroke="#91a77b" stroke-width="0.15"/>${plan.labels.map((label) => `<path d="${paths(label.polygons)}" fill="#3b5531" fill-rule="evenodd"/>`).join("")}</g>`;
+      document.getElementById("fitTestDimensions").textContent = `${plan.width} × ${plan.depth} mm · 2 mm base + 0.6 mm raised labels`;
+      this.choices.replaceChildren(...plan.sizes.map((size) => {
+        const button = document.createElement("button"), value = document.createElement("strong"), unit = document.createElement("small");
+        button.type = "button";
+        button.dataset.hole = String(size);
+        button.setAttribute("aria-label", `Use ${size.toFixed(1)} mm center hole`);
+        value.textContent = size.toFixed(1);
+        unit.textContent = "mm";
+        button.append(value, unit);
+        button.onclick = () => {
+          if (this.pending || this.isBusy()) return;
+          this.onSelect(size);
+          this.status.textContent = `Clock center hole set to ${size.toFixed(1)} mm. This strip keeps its printed sizes.`;
+          this.update();
+        };
+        return button;
+      }));
+      this.status.textContent = "Print the strip, try your movement shaft, then choose the matching size below.";
+      this.update();
+    }
+    update() {
+      const busy = this.isBusy();
+      this.openButton.disabled = busy;
+      if (!this.plan) return;
+      const hole = this.getHole(), height = this.getHeight();
+      document.getElementById("fitTestCenter").textContent = `Test centered on ${this.plan.center.toFixed(1)} mm`;
+      document.getElementById("fitTestCurrent").textContent = `Clock hole: ${hole.toFixed(1)} mm`;
+      document.getElementById("fitTestClockHeight").textContent = `${height.measured ? "Measured model height:" : "Model height: up to"} ${Number(height.value.toFixed(1))} mm`;
+      this.newButton.hidden = hole === this.plan.center;
+      this.newButton.textContent = `New test around ${hole.toFixed(1)} mm`;
+      this.newButton.disabled = busy || !!this.pending;
+      this.downloadButton.disabled = busy || !!this.pending;
+      this.downloadButton.textContent = this.pending ? "Preparing fit test…" : this.prepared ? "Download this strip again" : "Download fit test STL";
+      document.getElementById("cancelFitTest").hidden = !this.pending;
+      for (const button of this.choices.children) {
+        button.disabled = busy || !!this.pending;
+        button.setAttribute("aria-pressed", String(Number(button.dataset.hole) === hole));
+      }
+      this.dialog.setAttribute("aria-busy", String(!!this.pending));
+    }
+    async download() {
+      if (this.pending || this.isBusy() || !this.plan) return;
+      const controller = new AbortController(), center = this.plan.center;
+      this.controller = controller;
+      this.pending = true;
+      this.update();
+      this.status.textContent = "Preparing the labeled test strip…";
+      try {
+        const buffer = this.buffer || await buildStrip(center, this.workerURL, controller.signal);
+        controller.signal.throwIfAborted();
+        if (!this.dialog.open) return;
+        this.buffer = buffer;
+        this.prepared = true;
+        const url = URL.createObjectURL(new Blob([buffer], { type: "model/stl" })), link = document.createElement("a");
+        link.href = url;
+        link.download = `clock-factory-fit-test-${center.toFixed(1)}mm.stl`;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1e4);
+        this.status.textContent = "Your test file is ready. Print it flat with the same material and slicer settings as your clock, then select the best-fitting size.";
+      } catch (error) {
+        this.status.textContent = error.name === "AbortError" ? "Fit test cancelled. You can prepare it again." : "Could not prepare the fit test: " + error.message;
+      } finally {
+        if (this.controller === controller) {
+          this.controller = null;
+          this.pending = false;
+          this.update();
+        }
+      }
+    }
+    dispose() {
+      this.controller?.abort();
+      this.buffer = null;
+    }
+  };
+
   // app.js
   var $ = (id) => document.getElementById(id);
   var colors = [["Terracotta", "#c47f62"], ["Oat milk", "#dfd5bd"], ["Sage", "#94a18a"], ["Forest", "#485c48"], ["Ink", "#434643"], ["Lavender", "#aaa0b5"], ["Dusty rose", "#c99d99"]];
@@ -5721,13 +5935,14 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("sizeError").hidden = !invalid || invalid.id !== "diameterNumber";
     if (invalid) {
       const size = invalid.id === "diameterNumber";
-      $(size ? "sizeError" : "dimensionError").textContent = size ? "Enter a diameter from 100 to 300 mm, in steps of 1 mm." : `Enter ${invalid.id === "hole" ? "a center hole from 5 to 15" : "a face thickness from 2 to 10"} mm, in steps of 0.5 mm.`;
+      $(size ? "sizeError" : "dimensionError").textContent = size ? "Enter a diameter from 100 to 300 mm, in steps of 1 mm." : invalid.id === "hole" ? "Enter a center hole from 5 to 15 mm, in steps of 0.1 mm." : "Enter a face thickness from 2 to 10 mm, in steps of 0.5 mm.";
       if (focus) {
         if (!size) document.querySelector(".advanced-settings").open = true;
         invalid.focus();
       }
     }
     $("export").disabled = !!invalid || importPending || deletingArtwork || restorePending || !!exportController;
+    $("showFitTest").disabled = $("hole").value === "" || !$("hole").validity.valid || importPending || deletingArtwork || restorePending || !!exportController;
     return !invalid;
   }
   $("diameterNumber").addEventListener("input", () => {
@@ -5983,6 +6198,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     updateSaveLabel();
     updateHistoryUI();
     updateFilamentPreview();
+    holeFit.update();
   }
   async function refreshGallery() {
     const sequence = ++gallerySequence;
@@ -6405,6 +6621,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("fitToBed").hidden = !valid || !fit || fit.fits;
     $("connectArtwork").hidden = state.design !== "custom" || state.svgBacking || !stats || stats.components < 2;
     $("connectArtwork").disabled = !!checkController || importPending || restorePending || deletingArtwork;
+    holeFit.update();
     if (meshView) meshView.setBed(bed.width, bed.depth, fit?.fits !== false, $("meshBed").checked);
   }
   function saveBuildPlate() {
@@ -6670,6 +6887,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     checkController?.abort();
     meshView?.dispose();
     filamentPreview.dispose();
+    holeFit.dispose();
   });
   $("cancelExport").onclick = () => exportController?.abort();
   $("export").onclick = async () => {
@@ -6682,6 +6900,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     }
     const controller = new AbortController();
     exportController = controller;
+    holeFit.update();
     const button = $("export");
     button.disabled = true;
     button.textContent = "Preparing your clock…";
@@ -6721,8 +6940,18 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       validateDimensions();
       $("exportProgress").hidden = true;
       $("printSection").setAttribute("aria-busy", "false");
+      holeFit.update();
     }
   };
+  var holeFit = new HoleFitDialog({ workerURL, getHole: () => state.hole, isBusy: () => importPending || restorePending || deletingArtwork || !!exportController || $("hole").value === "" || !$("hole").validity.valid, getHeight: () => {
+    const stats = meshStore.peek(geometryKey())?.stats;
+    const extra = originalArtwork() ? state.svgRelief + (state.markers ? 0.8 : 0) : Math.max(state.texture === "smooth" ? 0 : 0.4, state.markers ? 0.8 : 0);
+    return { value: stats?.dimensions[2] ?? artworkSurfaceHeight(state) + extra, measured: !!stats };
+  }, onSelect: (hole) => {
+    state.hole = hole;
+    delete $("hole").dataset.editing;
+    render();
+  } });
   var filamentPreview = new FilamentPreview({ workerURL, prepareRaster: prepareFilamentRaster, onColorChange: (source, color, final) => {
     const overrides = { ...state.bambuColors };
     if (source === color.toUpperCase()) delete overrides[source];

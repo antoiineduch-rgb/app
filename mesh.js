@@ -68,6 +68,9 @@ function circle(radius,error=CURVE_ERROR,minimum=32) {
   const count=Math.ceil(Math.max(minimum,Math.ceil(Math.PI/Math.acos(Math.max(-1,1-error/radius))))/4)*4;
   return Array.from({length:count+1},(_,i)=>{const a=(i%count)/count*Math.PI*2;return [snap(radius*Math.cos(a)),snap(radius*Math.sin(a))];});
 }
+// Shared by the clock and its calibration strip, so a labeled test opening
+// uses the same analytic contour and tolerance as the finished clock.
+export function shaftOpening(diameter){return circle(diameter/2,.001,128);}
 function markerPolygons(diameter,padding=0) {
   const result=[];
   for(let i=0;i<12;i++){
@@ -111,10 +114,10 @@ export function buildClockLayers(alpha,n,settings,progress=()=>{},artwork=null) 
   const {polygons:outline,frame}=silhouette(alpha,n,diameter,backed?artworkFrame(alpha,n,diameter,settings):null);
   // An analytic 128+ segment shaft circle maintains the requested fit without
   // stair-stepping or smoothing the hole into an undersized opening.
-  const base=clipping.difference(outline,[[circle(hole/2,.001,128)]]);
+  const opening=shaftOpening(hole),base=clipping.difference(outline,[[opening]]);
   if(!base.length)throw Error('The center opening covers the entire clock face.');
   const layers=backed?[
-    {height:backingDepth(settings),polygons:clipping.difference([[circle(diameter/2,CURVE_ERROR,128)]],[[circle(hole/2,.001,128)]])},
+    {height:backingDepth(settings),polygons:clipping.difference([[circle(diameter/2,CURVE_ERROR,128)]],[[opening]])},
     {height:thickness,polygons:base}
   ]:[{height:thickness,polygons:base}];
   progress('details');
