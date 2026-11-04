@@ -133,6 +133,7 @@ async function run(window) {
   }
   async function click(id) { await evaluate(id => document.getElementById(id).click(), id); }
   async function download(extension) {
+    await set('threeMFTarget','standard','change');
     const result = await evaluate(async extension => {
       const before=window.__numberDownloads.length;
       document.getElementById('export').click();

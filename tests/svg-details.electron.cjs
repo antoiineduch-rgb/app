@@ -75,6 +75,7 @@ async function run(window){
   assert.equal(await evaluate(()=>document.getElementById('texture').hidden),true,'added textures do not obscure original artwork');
   console.log('PASS colors, gradients, CSS, symbols, clipping, fine lines, text, patterns, and filters remain visible');
   async function download(format){
+    await set('threeMFTarget','standard','change');
     await set('exportFormat',format,'change');
     const result=await evaluate(async()=>{
       const before=window.__detailDownloads.length;document.getElementById('export').click();const deadline=performance.now()+30000;

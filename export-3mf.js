@@ -5,7 +5,7 @@ const MATERIAL_NAMESPACE = 'http://schemas.microsoft.com/3dmanufacturing/materia
 const MODEL_TYPE = 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml';
 const XML_HEADER = '<?xml version="1.0" encoding="UTF-8"?>';
 
-function escapeXML(value) {
+export function escapeXML(value) {
   // Remove characters XML 1.0 cannot represent, including lone surrogates.
   const text = [...value].filter(character => {
     const code = character.codePointAt(0);
@@ -21,6 +21,20 @@ function stlView(input) {
   if (input instanceof ArrayBuffer) return new DataView(input);
   if (ArrayBuffer.isView(input)) return new DataView(input.buffer, input.byteOffset, input.byteLength);
   throw new TypeError('The printable mesh must be a binary STL buffer.');
+}
+
+export function* binarySTLTriangles(buffer){
+  const view=stlView(buffer);
+  if(view.byteLength<84)throw new RangeError('The printable mesh is incomplete.');
+  const count=view.getUint32(80,true);
+  if(!count||84+count*50!==view.byteLength)throw new RangeError('The printable mesh has an invalid triangle count.');
+  for(let i=0;i<count;i++){
+    const offset=96+i*50,points=[0,1,2].map(j=>[0,1,2].map(k=>view.getFloat32(offset+j*12+k*4,true)));
+    if(!points.every(point=>point.every(Number.isFinite)))throw new RangeError('The printable mesh contains invalid coordinates.');
+    const [a,b,c]=points,u=b.map((value,k)=>value-a[k]),v=c.map((value,k)=>value-a[k]);
+    if(Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0])===0)throw new RangeError('The printable mesh contains an empty triangle.');
+    yield points;
+  }
 }
 
 // A generic 3MF model. Index the validated STL without changing its geometry.

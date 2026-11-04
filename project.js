@@ -2,8 +2,8 @@ import { designs } from './geometry.js';
 import { normalizeOrientation } from './svg-placement.js';
 
 export const MAX_PROJECT_BYTES=12*1024*1024;
-export const DEFAULT_SETTINGS=Object.freeze({design:'petal',projectName:'My Clock',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true,hourStyle:'ticks',numberSize:100,numberPosition:100,exportFormat:'stl',svgDetail:'artwork',svgRelief:.8,svgTone:'contrast',showHands:true});
-const choices={design:[...designs.map(d=>d.id),'custom'],texture:['smooth','ripple','grain'],hourStyle:['ticks','arabic','roman'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light']};
+export const DEFAULT_SETTINGS=Object.freeze({design:'petal',projectName:'My Clock',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true,hourStyle:'ticks',numberSize:100,numberPosition:100,exportFormat:'stl',svgDetail:'artwork',svgRelief:.8,svgTone:'contrast',showHands:true,threeMFTarget:'bambu-a1',filamentCount:4,bambuBackColor:'background'});
+const choices={design:[...designs.map(d=>d.id),'custom'],texture:['smooth','ripple','grain'],hourStyle:['ticks','arabic','roman'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light'],threeMFTarget:['bambu-a1','standard'],filamentCount:[2,4],bambuBackColor:['background','face']};
 const ranges={color:[0,6,1],diameter:[100,300,1],thickness:[2,10,.5],hole:[5,15,.5],numberSize:[70,130,5],numberPosition:[80,120,5],svgRelief:[0,2,.2]};
 const bytes=value=>new TextEncoder().encode(value).byteLength;
 const record=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);

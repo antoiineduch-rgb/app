@@ -2634,11 +2634,11 @@
     let anchor = 0;
     for (let i2 = 1; i2 < ring.length; i2++) if (ring[i2][0] < ring[anchor][0] || ring[i2][0] === ring[anchor][0] && ring[i2][1] < ring[anchor][1]) anchor = i2;
     const ordered = Array.from({ length: ring.length + 1 }, (_, i2) => ring[(anchor + i2) % ring.length]);
-    let opposite = 1, distance = 0;
+    let opposite = 1, distance2 = 0;
     for (let i2 = 1; i2 < ring.length; i2++) {
       const dx = ordered[i2][0] - ordered[0][0], dy = ordered[i2][1] - ordered[0][1], candidate = dx * dx + dy * dy;
-      if (candidate > distance) {
-        distance = candidate;
+      if (candidate > distance2) {
+        distance2 = candidate;
         opposite = i2;
       }
     }
@@ -3625,12 +3625,12 @@
     red /= samples;
     green /= samples;
     blue /= samples;
-    const distance = (r, g, b) => Math.sqrt(0.2126 * (r - red) ** 2 + 0.7152 * (g - green) ** 2 + 0.0722 * (b - blue) ** 2);
+    const distance2 = (r, g, b) => Math.sqrt(0.2126 * (r - red) ** 2 + 0.7152 * (g - green) ** 2 + 0.0722 * (b - blue) ** 2);
     let maxDistance = 0;
     if (mode === "contrast") {
       for (let i2 = 0; i2 < alpha.length; i2++) if (alpha[i2] >= cutoff) {
         const p = i2 * 4;
-        maxDistance = Math.max(maxDistance, distance(rgba[p], rgba[p + 1], rgba[p + 2]));
+        maxDistance = Math.max(maxDistance, distance2(rgba[p], rgba[p + 1], rgba[p + 2]));
       }
     }
     const range = maxLight - minLight;
@@ -3638,7 +3638,7 @@
     const relief = new Uint8Array(n * n);
     for (let i2 = 0; i2 < alpha.length; i2++) if (alpha[i2] >= 128) {
       const p = i2 * 4, r = rgba[p], g = rgba[p + 1], b = rgba[p + 2], light = luminance(r, g, b);
-      const value = mode === "contrast" ? distance(r, g, b) / maxDistance : mode === "dark" ? (maxLight - light) / range : (light - minLight) / range;
+      const value = mode === "contrast" ? distance2(r, g, b) / maxDistance : mode === "dark" ? (maxLight - light) / range : (light - minLight) / range;
       relief[i2] = Math.min(255, Math.max(0, Math.round(value * 255)), alpha[i2]);
     }
     return relief;
@@ -4546,6 +4546,19 @@
     if (ArrayBuffer.isView(input)) return new DataView(input.buffer, input.byteOffset, input.byteLength);
     throw new TypeError("The printable mesh must be a binary STL buffer.");
   }
+  function* binarySTLTriangles(buffer) {
+    const view2 = stlView(buffer);
+    if (view2.byteLength < 84) throw new RangeError("The printable mesh is incomplete.");
+    const count = view2.getUint32(80, true);
+    if (!count || 84 + count * 50 !== view2.byteLength) throw new RangeError("The printable mesh has an invalid triangle count.");
+    for (let i2 = 0; i2 < count; i2++) {
+      const offset = 96 + i2 * 50, points = [0, 1, 2].map((j) => [0, 1, 2].map((k) => view2.getFloat32(offset + j * 12 + k * 4, true)));
+      if (!points.every((point) => point.every(Number.isFinite))) throw new RangeError("The printable mesh contains invalid coordinates.");
+      const [a, b, c] = points, u = b.map((value, k) => value - a[k]), v = c.map((value, k) => value - a[k]);
+      if (Math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]) === 0) throw new RangeError("The printable mesh contains an empty triangle.");
+      yield points;
+    }
+  }
   function stlTo3MF(buffer, { name = "Clock Factory", color = "#C47F62", artwork = null } = {}) {
     if (typeof name !== "string") throw new TypeError("The model name must be text.");
     if (typeof color !== "string" || !/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(color)) {
@@ -4632,10 +4645,192 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength);
   }
 
+  // bambu-paint.js
+  var rgb = (hex2) => [1, 3, 5].map((at) => parseInt(hex2.slice(at, at + 2), 16));
+  var hex = (color) => "#" + color.map((value) => Math.round(value).toString(16).padStart(2, "0")).join("").toUpperCase();
+  var distance = (a, b) => 0.2126 * (a[0] - b[0]) ** 2 + 0.7152 * (a[1] - b[1]) ** 2 + 0.0722 * (a[2] - b[2]) ** 2;
+  var bin = (r, g, b) => (r >> 3) * 1024 + (g >> 3) * 32 + (b >> 3);
+  function composite(data, at, base) {
+    const a = data[at + 3] / 255;
+    return [0, 1, 2].map((k) => Math.round(data[at + k] * a + base[k] * (1 - a)));
+  }
+  function dominantArtworkColor(raster, fallback) {
+    if (!raster) return fallback;
+    const { rgba } = raster, counts2 = new Uint32Array(32768), sums = [new Float64Array(32768), new Float64Array(32768), new Float64Array(32768)];
+    let mode = 0, best = 0;
+    for (let at = 0; at < rgba.length; at += 4) if (rgba[at + 3] >= 240) {
+      const key = bin(rgba[at], rgba[at + 1], rgba[at + 2]);
+      if (++counts2[key] > best) {
+        best = counts2[key];
+        mode = key;
+      }
+      for (let k = 0; k < 3; k++) sums[k][key] += rgba[at + k];
+    }
+    return best ? hex(sums.map((values) => values[mode] / best)) : fallback;
+  }
+  function filamentPaint(raster, baseColor, maxColors = 4) {
+    if (![2, 4, 8, 16].includes(maxColors)) throw Error("Choose 2, 4, 8, or 16 filaments.");
+    if (typeof baseColor !== "string" || !/^#[0-9a-f]{6}$/i.test(baseColor)) throw Error("Choose a valid back color.");
+    const base = rgb(baseColor);
+    if (!raster) return { palette: [hex(base)], map: null, mips: null };
+    const { rgba, width, height } = raster;
+    if (!(rgba instanceof Uint8Array || rgba instanceof Uint8ClampedArray) || !Number.isInteger(width) || width < 2 || width > 2048 || height !== width || rgba.length !== width * height * 4) throw Error("The SVG filament-color image is incomplete.");
+    const counts2 = new Uint32Array(32768), sums = [new Float64Array(32768), new Float64Array(32768), new Float64Array(32768)];
+    let total = 0;
+    for (let at = 0; at < rgba.length; at += 4) if (rgba[at + 3] >= 128) {
+      const color = composite(rgba, at, base), key = bin(...color);
+      counts2[key]++;
+      total++;
+      for (let k = 0; k < 3; k++) sums[k][key] += color[k];
+    }
+    const samples = [];
+    for (let key = 0; key < counts2.length; key++) if (counts2[key]) samples.push({ key, count: counts2[key], color: sums.map((values) => values[key] / counts2[key]) });
+    let centers = [base];
+    while (centers.length < maxColors) {
+      let selected = null, best = 0;
+      for (const sample of samples) {
+        const gap = Math.min(...centers.map((center) => distance(sample.color, center))), score = gap * sample.count;
+        if (gap > 64 && score > best) {
+          best = score;
+          selected = sample;
+        }
+      }
+      if (!selected) break;
+      centers.push(selected.color);
+    }
+    const nearest = (color, values) => {
+      let index = 0, best = Infinity;
+      for (let i2 = 0; i2 < values.length; i2++) {
+        const d = distance(color, values[i2]);
+        if (d < best) {
+          index = i2;
+          best = d;
+        }
+      }
+      return index;
+    };
+    for (let iteration = 0; iteration < 6; iteration++) {
+      const groups = centers.map(() => ({ sum: [0, 0, 0], count: 0 }));
+      for (const sample of samples) {
+        const group = groups[nearest(sample.color, centers)];
+        group.count += sample.count;
+        for (let k = 0; k < 3; k++) group.sum[k] += sample.color[k] * sample.count;
+      }
+      centers = centers.map((color, i2) => i2 && groups[i2].count ? groups[i2].sum.map((value) => value / groups[i2].count) : color);
+    }
+    const representatives = centers.map(() => ({ mass: 0, mode: null }));
+    for (const sample of samples) {
+      const group = representatives[nearest(sample.color, centers)];
+      group.mass += sample.count;
+      if (!group.mode || sample.count > group.mode.count) group.mode = sample;
+    }
+    const colors2 = [base];
+    for (const group of representatives.slice(1).sort((a, b) => b.mass - a.mass)) if (group.mode && group.mass >= Math.max(1, total * 5e-4) && !colors2.some((color) => distance(color, group.mode.color) < 16)) colors2.push(group.mode.color);
+    const palette = colors2.map(hex), lookup = new Uint8Array(32768);
+    for (const sample of samples) lookup[sample.key] = nearest(sample.color, colors2);
+    const map = new Uint8Array(width * height);
+    for (let i2 = 0; i2 < map.length; i2++) if (rgba[i2 * 4 + 3] >= 128) map[i2] = lookup[bin(...composite(rgba, i2 * 4, base))];
+    const mips = [{ width, data: Uint16Array.from(map, (value) => 1 << value) }];
+    while (mips.at(-1).width > 1) {
+      const previous = mips.at(-1), size = Math.ceil(previous.width / 2), data = new Uint16Array(size * size);
+      for (let y = 0; y < size; y++) for (let x2 = 0; x2 < size; x2++) {
+        let mask = 0;
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) if (x2 * 2 + dx < previous.width && y * 2 + dy < previous.width) mask |= previous.data[(y * 2 + dy) * previous.width + x2 * 2 + dx];
+        data[y * size + x2] = mask;
+      }
+      mips.push({ width: size, data });
+    }
+    return { palette, map, mips, width };
+  }
+  function filamentCode(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= 16) throw Error("The filament index is invalid.");
+    const state2 = index + 1;
+    return state2 < 3 ? (state2 * 4).toString(16).toUpperCase() : (state2 - 3).toString(16).toUpperCase() + "C";
+  }
+  function uniformRectangle(paint, minX, minY, maxX, maxY, bit) {
+    const last = paint.mips.length - 1;
+    function visit(level, x2, y) {
+      const mip = paint.mips[level];
+      if (x2 >= mip.width || y >= mip.width) return true;
+      const span = 2 ** level, left = x2 * span, top = y * span, right = left + span - 1, bottom = top + span - 1;
+      if (right < minX || bottom < minY || left > maxX || top > maxY) return true;
+      const mask = mip.data[y * mip.width + x2];
+      if ((mask & ~bit) === 0) return true;
+      if (level === 0 || left >= minX && top >= minY && right <= maxX && bottom <= maxY) return false;
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) if (!visit(level - 1, x2 * 2 + dx, y * 2 + dy)) return false;
+      return true;
+    }
+    return visit(last, 0, 0);
+  }
+  function paintFacet(points, frame, paint, budget = { nodes: 0 }) {
+    if (!paint.map) return filamentCode(0);
+    if (!frame || frame.n !== paint.width || ![frame.scale, frame.cx, frame.cy].every(Number.isFinite) || frame.scale <= 0) throw Error("The SVG filament colors have an invalid placement.");
+    const project = (point) => [point[0] / frame.scale + frame.cx, frame.cy - point[1] / frame.scale];
+    const sample = (x2, y) => paint.map[Math.max(0, Math.min(paint.width - 1, Math.floor(y))) * paint.width + Math.max(0, Math.min(paint.width - 1, Math.floor(x2)))];
+    const midpoint = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const tolerance = 0.25 / frame.scale;
+    function split(vertices, depth) {
+      if (++budget.nodes > 2e6) throw Error("The SVG color map is too complex. Choose fewer filaments or simplify its smallest details.");
+      const centroid = [0, 1].map((k) => (vertices[0][k] + vertices[1][k] + vertices[2][k]) / 3), color = sample(...centroid);
+      const bounds = [0, 1].map((k) => [Math.floor(Math.min(...vertices.map((p) => p[k]))), Math.floor(Math.max(...vertices.map((p) => p[k])))]);
+      const lengths = vertices.map((a2, i2) => {
+        const b2 = vertices[(i2 + 1) % 3];
+        return (a2[0] - b2[0]) ** 2 + (a2[1] - b2[1]) ** 2;
+      });
+      const longest = Math.max(...lengths);
+      if (longest <= tolerance * tolerance || depth >= 20 || uniformRectangle(paint, bounds[0][0], bounds[1][0], bounds[0][1], bounds[1][1], 1 << color)) return { code: filamentCode(color), color };
+      const special = (lengths.indexOf(longest) + 2) % 3, [a, b, c] = [0, 1, 2].map((i2) => vertices[(special + i2) % 3]), middle = midpoint(b, c);
+      const left = split([a, b, middle], depth + 1), right = split([middle, c, a], depth + 1);
+      if (left.color >= 0 && left.color === right.color) return left;
+      return { code: left.code + right.code + (special * 4 + 1).toString(16).toUpperCase(), color: -1 };
+    }
+    return split(points.map(project), 0).code;
+  }
+
+  // export-bambu.js
+  var header = '<?xml version="1.0" encoding="UTF-8"?>';
+  function stlToBambu3MF(buffer, { name = "Clock Factory", color = "#C47F62", painting = null, maxColors = 4, backColor = "background" } = {}) {
+    if (typeof name !== "string") throw new TypeError("The model name must be text.");
+    if (![2, 4].includes(maxColors)) throw Error("An A1 with AMS Lite supports up to 4 filaments. Choose 2 or 4 colors.");
+    if (painting && (!painting.frame || painting.frame.n !== painting.width || !Number.isFinite(painting.thickness) || painting.thickness <= 0)) throw Error("The SVG filament colors have an invalid placement.");
+    if (!["background", "face"].includes(backColor)) throw Error("Choose a valid back color mode.");
+    const paint = filamentPaint(painting, backColor === "background" ? dominantArtworkColor(painting, color) : color, maxColors), title = escapeXML(name.trim() || "Clock Factory"), vertices = [], triangles = [], ids = /* @__PURE__ */ new Map(), budget = { nodes: 0 };
+    let minX = Infinity, minY = Infinity;
+    const vertex = (point) => {
+      const key = point.join(",");
+      let id = ids.get(key);
+      if (id === void 0) {
+        id = vertices.length;
+        ids.set(key, id);
+        vertices.push(`<vertex x="${point[0]}" y="${point[1]}" z="${point[2]}"/>`);
+        minX = Math.min(minX, point[0]);
+        minY = Math.min(minY, point[1]);
+      }
+      return id;
+    };
+    for (const points of binarySTLTriangles(buffer)) {
+      const indices = points.map(vertex), painted = painting && points.every((point) => point[2] >= painting.thickness - 1e-5);
+      const code = painted ? paintFacet(points, painting.frame, paint, budget) : filamentCode(0);
+      triangles.push(`<triangle v1="${indices[0]}" v2="${indices[1]}" v3="${indices[2]}" paint_color="${code}"/>`);
+    }
+    const model = `${header}
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+<metadata name="Application">BambuStudio-02.00.00.00</metadata><metadata name="Creator">Clock Factory</metadata><metadata name="Title">${title}</metadata>
+<metadata name="BambuStudio:3mfVersion">1</metadata><metadata name="BambuStudio:MmPaintingVersion">0</metadata>
+<resources><object id="2" type="model" name="${title}"><mesh><vertices>${vertices.join("")}</vertices><triangles>${triangles.join("")}</triangles></mesh></object></resources>
+<build><item objectid="2" transform="1 0 0 0 1 0 0 0 1 ${-minX} ${-minY} 0"/></build></model>`;
+    const types = `${header}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="config" ContentType="application/octet-stream"/></Types>`;
+    const rels = `${header}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="model" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" Target="/3D/3dmodel.model"/></Relationships>`;
+    const config = `${header}<config><object id="2"><metadata key="name" value="${title}"/><metadata key="extruder" value="1"/><part id="2" subtype="normal_part"><metadata key="name" value="Clock face"/><metadata key="extruder" value="1"/></part></object></config>`;
+    const settings = JSON.stringify({ filament_colour: paint.palette, filament_settings_id: paint.palette.map(() => "Generic PLA @BBL A1"), printer_settings_id: "Bambu Lab A1 0.4 nozzle", print_settings_id: "0.20mm Standard @BBL A1", nozzle_diameter: ["0.4"], printable_height: "256", printable_area: ["0x0", "256x0", "256x256", "0x256"], flush_volumes_matrix: [] });
+    const zip = zipSync({ "[Content_Types].xml": strToU8(types), "_rels/.rels": strToU8(rels), "3D/3dmodel.model": strToU8(model), "Metadata/model_settings.config": strToU8(config), "Metadata/project_settings.config": strToU8(settings) }, { level: 6, mtime: new Date(2e3, 0, 1) });
+    return { buffer: zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength), palette: paint.palette };
+  }
+
   // project.js
   var MAX_PROJECT_BYTES = 12 * 1024 * 1024;
-  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true });
-  var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"] };
+  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background" });
+  var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] };
   var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.5], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2] };
   var bytes = (value) => new TextEncoder().encode(value).byteLength;
   var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -4935,7 +5130,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? settings.hourStyle : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null]);
   }
   function fileKey(settings = state) {
-    return JSON.stringify([geometryKey(settings), settings.exportFormat, settings.exportFormat === "3mf" ? colors[settings.color][1] : null]);
+    return JSON.stringify([geometryKey(settings), settings.exportFormat, settings.exportFormat === "3mf" ? [colors[settings.color][1], settings.threeMFTarget, settings.threeMFTarget === "bambu-a1" ? [settings.filamentCount, settings.bambuBackColor] : null] : null]);
   }
   function toast(message) {
     $("toast").textContent = message;
@@ -5038,6 +5233,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("svgTone").value = state.svgTone;
     $("texture").hidden = $("textureLabel").hidden = detailed;
     $("faceColorHint").textContent = detailed ? "Your SVG keeps its original colors. This filament color is used for the back and edges." : "A preview of your filament color. Choose the matching filament when you print.";
+    if (detailed && state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1" && state.bambuBackColor === "background") $("faceColorHint").textContent = "The Bambu export matches the SVG background on the back. Choose “Use selected face color” in its export options to use this swatch.";
     updateExportFormatUI();
     const d = designs.find((d2) => d2.id === state.design);
     $("designTitle").innerHTML = d ? `The ${d.name} Clock <span>↗</span>` : "Your Custom Clock <span>↗</span>";
@@ -5227,8 +5423,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     validateDimensions();
     render({ historyGroup: id === "markers" ? null : id });
   }));
-  for (const id of ["hourStyle", "exportFormat", "svgDetail", "svgTone"]) $(id).addEventListener("change", () => {
-    const value = $(id).value, allowed = { hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"] }[id];
+  for (const id of ["hourStyle", "exportFormat", "svgDetail", "svgTone", "threeMFTarget", "filamentCount", "bambuBackColor"]) $(id).addEventListener("change", () => {
+    const value = id === "filamentCount" ? Number($(id).value) : $(id).value, allowed = { hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] }[id];
     if (!allowed.includes(value)) return;
     state[id] = value;
     render();
@@ -5241,9 +5437,27 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   function updateExportFormatUI() {
     const format = state.exportFormat.toUpperCase();
     $("exportFormat").value = state.exportFormat;
-    $("exportType").textContent = `${format} file`;
+    const bambu = state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1";
+    $("exportType").textContent = bambu ? "3MF · Bambu A1" : `${format} file`;
     $("exportFormatHint").textContent = originalArtwork() ? state.exportFormat === "3mf" ? "3MF keeps the SVG relief and original artwork as a color texture. Texture color support depends on your slicer." : "STL keeps the SVG details as relief. STL stores geometry; use 3MF to keep the artwork colors too." : state.exportFormat === "3mf" ? "3MF includes the mesh, millimeter units, and selected face color." : "STL exports the printable mesh. Colors are a filament preview.";
+    $("threeMFOptions").hidden = state.exportFormat !== "3mf";
+    $("threeMFTarget").value = state.threeMFTarget;
+    $("filamentCount").value = state.filamentCount;
+    $("bambuBackColor").value = state.bambuBackColor;
+    $("bambuOptions").hidden = !bambu;
+    if (bambu) $("exportFormatHint").textContent = "Open the .3mf as a project in Bambu Studio. Check your A1 0.4 mm and filament presets, then map the numbered colors to your AMS spools before slicing.";
+    showFilamentPalette(exportCache?.key === fileKey() ? exportCache.palette : null);
     if (!exportController) $("export").innerHTML = `Download ${format} <span>↓</span>`;
+  }
+  function showFilamentPalette(palette) {
+    $("filamentPalette").replaceChildren();
+    if (!palette?.length) return;
+    palette.forEach((color, i2) => {
+      const chip = document.createElement("span"), dot = document.createElement("i");
+      dot.style.backgroundColor = color;
+      chip.append(dot, document.createTextNode(`${i2 + 1} · ${color}`));
+      $("filamentPalette").append(chip);
+    });
   }
   for (const id of ["thickness", "hole"]) $(id).addEventListener("blur", () => {
     if (validateDimensions()) {
@@ -5652,8 +5866,15 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
           try {
             signal.throwIfAborted();
             const mesh = cachedSTL || makeClockSTL(alpha, n, settings, void 0, artwork), stats = cachedStats || analyzeSTL(mesh);
-            const buffer = settings.exportFormat === "3mf" ? stlTo3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor, artwork: artwork?.texture }) : mesh;
-            finish(null, { buffer, stlBuffer: mesh, stats });
+            let buffer = mesh, palette = null;
+            if (settings.exportFormat === "3mf") {
+              if (settings.threeMFTarget === "bambu-a1") {
+                const result = stlToBambu3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor, painting: artwork?.painting, maxColors: settings.filamentCount, backColor: settings.bambuBackColor });
+                buffer = result.buffer;
+                palette = result.palette;
+              } else buffer = stlTo3MF(mesh, { name: "Clock Factory clock face", color: settings.faceColor, artwork: artwork?.texture });
+            }
+            finish(null, { buffer, stlBuffer: mesh, stats, palette });
           } catch (error) {
             finish(error);
           }
@@ -5673,17 +5894,18 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
             return;
           }
           if (data.stage) onStage(data.stage);
-          if (data.buffer) finish(null, { buffer: data.buffer, stlBuffer: data.stlBuffer || data.buffer, stats: data.stats });
+          if (data.buffer) finish(null, { buffer: data.buffer, stlBuffer: data.stlBuffer || data.buffer, stats: data.stats, palette: data.palette });
         };
         worker.onerror = (event) => {
           event.preventDefault();
           fallback();
         };
         const copy = (cachedSTL || alpha.buffer).slice(0);
-        const transferredArtwork = artwork ? { rgba: artwork.rgba?.slice(), texture: { ...artwork.texture, png: artwork.texture.png.slice() } } : null;
+        const transferredArtwork = artwork ? { rgba: artwork.rgba?.slice(), texture: artwork.texture ? { ...artwork.texture, png: artwork.texture.png.slice() } : null, painting: artwork.painting ? { ...artwork.painting, rgba: artwork.painting.rgba.slice() } : null } : null;
         const transfers = [copy];
         if (transferredArtwork?.rgba) transfers.push(transferredArtwork.rgba.buffer);
         if (transferredArtwork?.texture) transfers.push(transferredArtwork.texture.png.buffer);
+        if (transferredArtwork?.painting) transfers.push(transferredArtwork.painting.rgba.buffer);
         worker.postMessage({ id: 1, ...cachedSTL ? { stlBuffer: copy } : { alpha: copy }, n, settings, artwork: transferredArtwork, stats: cachedStats }, transfers);
         timer = setTimeout(fallback, 6e4);
       } catch {
@@ -5694,7 +5916,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   function downloadClock(blob, settings, key) {
     const url = URL.createObjectURL(blob), link = document.createElement("a");
     link.href = url;
-    link.download = `clock-factory-${settings.design}-${settings.diameter}mm.${settings.exportFormat}`;
+    link.download = `clock-factory-${settings.design}-${settings.diameter}mm${settings.exportFormat === "3mf" && settings.threeMFTarget === "bambu-a1" ? "-bambu-a1" : ""}.${settings.exportFormat}`;
     document.body.append(link);
     link.click();
     link.remove();
@@ -5759,7 +5981,29 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     updatePrintSummary();
     return result;
   }
-  var stageMessage = (stage) => ({ outline: "Tracing the clock outline…", details: "Adding the printable details…", mesh: "Closing the print mesh…", package: "Preparing your 3MF file…" })[stage] || "Checking your model…";
+  function prepareFilamentRaster(snapshot, mesh) {
+    const { settings, image, placement } = snapshot, n = Math.ceil(settings.diameter / 0.15), canvas = document.createElement("canvas");
+    canvas.width = canvas.height = n;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.scale(n / 400, n / 400);
+    if (settings.design === "custom") drawPlacedArtwork(context, image, placement);
+    else {
+      context.fillStyle = "#fff";
+      context.fill(new Path2D(outlines.get(settings.design)));
+    }
+    const alpha = new Uint8Array(n * n), pixels = context.getImageData(0, 0, n, n).data;
+    for (let i2 = 0; i2 < alpha.length; i2++) alpha[i2] = pixels[i2 * 4 + 3];
+    const frame = mesh.artwork?.texture.frame || artworkFrame(alpha, n, settings.diameter);
+    if (!originalArtwork(settings)) {
+      context.globalCompositeOperation = "source-in";
+      context.fillStyle = settings.faceColor;
+      context.fillRect(0, 0, 400, 400);
+    }
+    context.globalCompositeOperation = "source-atop";
+    paintHourDetails(context, settings);
+    return { rgba: context.getImageData(0, 0, n, n).data, width: n, height: n, frame, thickness: settings.thickness };
+  }
+  var stageMessage = (stage) => ({ outline: "Tracing the clock outline…", details: "Adding the printable details…", mesh: "Closing the print mesh…", package: "Preparing your 3MF file…", filaments: "Mapping your SVG colors to printable filaments…" })[stage] || "Checking your model…";
   function updatePrintSummary() {
     const key = geometryKey(), result = meshStore.peek(key), stats = result?.stats;
     if (checkController && key !== checkKey) checkController.abort();
@@ -6023,6 +6267,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     if (importPending || deletingArtwork || restorePending || exportController || !validateDimensions(true)) return;
     const snapshot = designSnapshot(), settings = snapshot.settings, key = fileKey(settings);
     if (exportCache?.key === key) {
+      showFilamentPalette(exportCache.palette);
       downloadClock(exportCache.blob, settings, key);
       return;
     }
@@ -6041,13 +6286,21 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         $("exportStatus").textContent = stageMessage(stage);
         const progress = $("exportProgress").querySelector("progress");
         progress.max = 100;
-        progress.value = { outline: 15, details: 40, mesh: 70, package: 90 }[stage] || 5;
+        progress.value = { outline: 15, details: 40, mesh: 70, filaments: 80, package: 90 }[stage] || 5;
       };
       const mesh = await ensureMesh(snapshot, controller.signal, onStage);
-      const result = settings.exportFormat === "3mf" ? await meshAsync(null, 0, settings, controller.signal, mesh.stlBuffer, mesh.artwork, onStage, mesh.stats) : { buffer: mesh.stlBuffer };
+      let artwork = mesh.artwork;
+      if (settings.exportFormat === "3mf" && settings.threeMFTarget === "bambu-a1") {
+        onStage("filaments");
+        artwork = { ...artwork, painting: prepareFilamentRaster(snapshot, mesh) };
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        controller.signal.throwIfAborted();
+      }
+      const result = settings.exportFormat === "3mf" ? await meshAsync(null, 0, settings, controller.signal, mesh.stlBuffer, artwork, onStage, mesh.stats) : { buffer: mesh.stlBuffer };
       controller.signal.throwIfAborted();
       const blob = new Blob([result.buffer], { type: settings.exportFormat === "3mf" ? "model/3mf" : "model/stl" });
-      exportCache = { key, blob };
+      exportCache = { key, blob, palette: result.palette };
+      showFilamentPalette(result.palette);
       downloadClock(blob, settings, key);
     } catch (error) {
       if (error.name === "AbortError") toast("Download cancelled. Your design is still here.");

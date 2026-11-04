@@ -49,6 +49,9 @@ jobs:
       - name: Test projects, undo, print checks, and real 3D inspection
         run: npm run test:studio
 
+      - name: Test Bambu A1 filament-color exports
+        run: npm run test:bambu
+
       - name: Build Windows installer
         run: npm run dist:win
 

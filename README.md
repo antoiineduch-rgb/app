@@ -32,8 +32,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.5.0-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.5.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.5.1-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.5.1-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
@@ -69,10 +69,22 @@ Upload an SVG by choosing a file or dropping it onto the upload area. The import
 
 Enable hour details and choose Simple ticks, Numbers (1–12), or Roman (I–XII). Number size and distance from the center are adjustable; labels stay upright when imported SVG artwork is rotated or mirrored. The same built-in vector outlines drive the preview and printed relief. A smooth halo around the numbers keeps texture clear of their edges.
 
-Choose STL or 3MF beside the download button. Both contain the same validated geometry in millimeters. In original SVG mode, 3MF also embeds the painted artwork as a PNG texture using the standard 3MF Materials extension, with UV placement matching the mesh after rotation and mirroring. The back and base edges use the selected filament color. Other designs store that color as a base material. Texture support depends on the slicer; color textures do not automatically assign filaments or printer profiles. STL contains geometry only, so its imported details appear through relief. Switching formats reuses the prepared mesh. The Windows app supports native Save As dialogs for both formats.
+Choose STL or 3MF beside the download button. Both contain the same validated geometry in millimeters. **3MF compatibility** distinguishes printable filament assignments from a visual texture. Switching formats or color limits reuses the prepared mesh. The Windows app supports native Save As dialogs for both formats.
+
+**Bambu Studio · A1 / 0.4 mm** is the default 3MF target. It writes an unsliced A1 project with native facet painting and a numbered filament palette, rather than relying on PNG texture support. Large mesh faces receive adaptive paint subdivisions, so internal SVG colors survive even when several colors lie on one flat triangle. The geometry itself is unchanged. The project references the installed A1 0.4 mm, 0.20 mm Standard, and Generic PLA presets; select the actual filament presets and map the numbered colors to your AMS spools before slicing. No temperatures or machine G-code are embedded. The file leaves flushing volumes unset; configure these in Studio for your selected filaments.
+
+A1 with AMS Lite supplies up to four filaments. Choose a maximum of 2 or 4; gradients and excess colors become solid-color regions. The exported palette appears below the controls. By default, the back matches the dominant SVG color to save a filament slot; **Use selected face color** preserves a separate back color within the same limit. Native downloads end in `-bambu-a1.3mf`. Open the file as a project in Bambu Studio so both painting and the palette are loaded, then check printer/material settings and slice. Re-export older texture-only files using this target to obtain filament assignments.
+
+**Standard 3MF · original color texture** retains the earlier generic export. In original SVG mode it embeds the painted artwork as a PNG using the standard 3MF Materials extension, with UV placement matching rotations and mirroring. The back and base edges use the selected face color. Texture support depends on the consumer; it does not assign AMS filaments. STL contains geometry only, so imported details appear through relief.
+
+The Bambu project uses the native `Application` discriminator required by Bambu's importer; `Creator` identifies Clock Factory as the generator. The native paint serialization follows Bambu's public facet-paint format and is independently implemented. Printer, temperature, and machine-code preset files are not bundled in Clock Factory.
 
 Run `npm run test:numerals-3mf` for desktop checks of number styles, size, position, saved settings, matching STL/3MF geometry, color, and a real native 3MF save. On display-free Linux pass the same Electron headless flags used for the SVG suites.
 
 Run `npm run test:svg-details` for original SVG color, gradient, pattern, fine-line, text, filter, and clipping checks, real detailed STL/3MF downloads, maximum relief with added numerals, texture orientation, worker fallback, and saved detail controls.
 
 Run `npm run test:studio` for project round-trips and native downloads, undo/redo and native menus, exact-size validation, genuine rendered 3D pixels, shared preview/export builds, build-plate fit, disconnected-part detection, cancellation during texture loading, mobile layout, and graphics fallback. The test uses software WebGL for deterministic graphics; the shipped application uses the device's normal graphics settings. On display-free Linux, run `npx electron --no-sandbox --ozone-platform=headless tests/studio.electron.cjs` after building, without `--disable-gpu`.
+
+Run `npm run test:bambu` for real desktop A1 exports, all four source colors, native sub-facet paint, exact STL geometry, color limits, back-color choices, and worker fallback. On display-free Linux use the same headless flags as the other SVG suites.
+
+For an independent consumer check, install Bambu Studio locally and run `node tests/bambu-reference.cjs /path/to/bambu-studio exported-bambu-a1.3mf`. This opens and saves the file in an isolated temporary profile, then asserts that Studio preserved every palette color and every painted facet/subdivision tree. It never slices, uploads, or prints. The A1 export was checked this way with official Bambu Studio 2.9.1.70.
