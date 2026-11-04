@@ -1,5 +1,6 @@
 import { Scene,Color,PerspectiveCamera,WebGLRenderer,BufferAttribute,BufferGeometry,Mesh,MeshStandardMaterial,HemisphereLight,DirectionalLight,LineSegments,LineBasicMaterial,PlaneGeometry,Texture,SRGBColorSpace,DoubleSide,Vector3,ACESFilmicToneMapping,PCFSoftShadowMap } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {artworkPixel,paintedTriangle,flatMechanismBox} from './artwork-surface.js';
 
 // Loaded only when the user requests print inspection. Render on interaction,
 // resize, or model changes; an idle studio does not run an animation loop.
@@ -24,6 +25,7 @@ export class PrintView{
     const ambient=new HemisphereLight(0xfff9ea,0x727c69,.9);ambient.position.set(0,0,1);this.scene.add(ambient);
     const key=new DirectionalLight(0xfff5de,3);key.position.set(-150,-100,300);key.castShadow=true;key.shadow.mapSize.set(1024,1024);key.shadow.camera.left=key.shadow.camera.bottom=-300;key.shadow.camera.right=key.shadow.camera.top=300;key.shadow.camera.near=1;key.shadow.camera.far=900;key.shadow.bias=-.0001;this.scene.add(key);this.keyLight=key;
     const fill=new DirectionalLight(0xe8edff,.9);fill.position.set(180,100,90);this.scene.add(fill);
+    const rear=new DirectionalLight(0xfff5de,2);rear.position.set(-100,-70,-300);this.scene.add(rear);
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(container);this.resize();
   }
   resize(){const {width,height}=this.container.getBoundingClientRect();if(width<2||height<2)return;this.camera.aspect=width/height;this.camera.updateProjectionMatrix();this.renderer.setSize(width,height,false);this.render();}
@@ -31,6 +33,7 @@ export class PrintView{
   setVisible(visible){if(this.visible===visible)return;this.visible=visible;if(visible)this.resize();}
   async setModel(result,settings,{signal}={}){
     signal?.throwIfAborted();
+    this.faceDown=flatMechanismBox(settings);
     const sequence=++this.sequence,view=new DataView(result.stlBuffer),count=view.getUint32(80,true);
     const positions=new Float32Array(count*9),normals=new Float32Array(count*9),uv=new Float32Array(count*6),groups=[];
     const texture=result.artwork?.texture;
@@ -40,8 +43,8 @@ export class PrintView{
       for(let j=0;j<3;j++){
         const at=i*9+j*3,x=view.getFloat32(96+i*50+j*12,true),y=view.getFloat32(100+i*50+j*12,true),z=view.getFloat32(104+i*50+j*12,true);
         positions.set([x,y,z],at);normals.set([0,1,2].map(k=>view.getFloat32(84+i*50+k*4,true)),at);
-        if(z<(texture?.thickness??settings.thickness)-1e-5)painted=false;
-        if(texture){const {scale,cx,cy,n}=texture.frame;uv.set([(x/scale+cx)/n,1-(cy-y/scale)/n],i*6+j*2);}
+        if(!paintedTriangle([[x,y,z]],texture))painted=false;
+        if(texture){const pixel=artworkPixel([x,y,z],texture.frame);uv.set([pixel[0]/texture.frame.n,1-pixel[1]/texture.frame.n],i*6+j*2);}
       }
       const material=painted?1:0;
       if(material!==previous){if(previous>=0)groups.push([start,(i*3)-start,previous]);start=i*3;previous=material;}
@@ -74,7 +77,7 @@ export class PrintView{
   setBed(width,depth,fits=true,visible=this.plateVisible){
     this.plateVisible=visible;
     const key=[width,depth,fits].join(',');
-    if(key===this.bedKey&&this.bed){for(const object of this.bed)object.visible=visible&&this.viewMode!=='back';this.render();return;}
+    if(key===this.bedKey&&this.bed){for(const object of this.bed)object.visible=visible&&this.viewMode!==(this.faceDown?'front':'back');this.render();return;}
     this.bedKey=key;
     for(const object of this.bed||[]){this.scene.remove(object);object.geometry.dispose();object.material.dispose();}
     const points=[];
@@ -83,13 +86,13 @@ export class PrintView{
     const geometry=new BufferGeometry();geometry.setAttribute('position',new BufferAttribute(new Float32Array(points),3));
     const grid=new LineSegments(geometry,new LineBasicMaterial({color:fits?'#d3d8cb':'#d9b6a6'}));
     const plane=new Mesh(new PlaneGeometry(width,depth),new MeshStandardMaterial({color:fits?'#e7eadf':'#eee1d8',roughness:1,metalness:0,side:DoubleSide}));plane.position.z=-.4;plane.receiveShadow=true;
-    this.bed=[plane,grid];for(const object of this.bed){object.visible=visible&&this.viewMode!=='back';this.scene.add(object);}this.render();
+    this.bed=[plane,grid];for(const object of this.bed){object.visible=visible&&this.viewMode!==(this.faceDown?'front':'back');this.scene.add(object);}this.render();
   }
   setView(view){
-    this.viewMode=view;for(const object of this.bed||[])object.visible=this.plateVisible&&view!=='back';
+    this.viewMode=view;for(const object of this.bed||[])object.visible=this.plateVisible&&view!==(this.faceDown?'front':'back');
     const distance=(this.span||200)*1.65;
     this.controls.target.set(0,0,0);
-    this.camera.position.copy(view==='front'?new Vector3(0,-.001,distance):view==='back'?new Vector3(distance*.15,-distance*.45,-distance*.9):new Vector3(distance*.22,-distance*.65,distance*.82));
+    this.camera.position.copy(view==='front'?new Vector3(0,-.001,this.faceDown?-distance:distance):view==='back'?new Vector3(distance*.15,-distance*.45,(this.faceDown?1:-1)*distance*.9):new Vector3(distance*.22,-distance*.65,distance*.82));
     this.controls.update();this.render();
   }
   zoom(factor){const offset=this.camera.position.clone().sub(this.controls.target);offset.setLength(Math.max(this.controls.minDistance,Math.min(this.controls.maxDistance,offset.length()*factor)));this.camera.position.copy(this.controls.target).add(offset);this.controls.update();this.render();}

@@ -33,7 +33,7 @@ async function run(window){
   const front=await download('stl');closed(stlFaces(front));assert.equal(analyzeSTL(front).components,1);
   console.log('PASS all 12 full hour labels fit a wide SVG, adapt to rotation, stay upright and export as a closed face');
 
-  await evaluate(()=>document.querySelector('.advanced-settings').open=true);await set('mechanismRecess',true);
+  await evaluate(()=>document.querySelector('.advanced-settings').open=true);await set('mechanismMount','recess');await set('mechanismRecess',true);
   assert.equal(await evaluate(()=>document.getElementById('recessWidth').value),'55');assert.equal(await evaluate(()=>document.getElementById('recessHeight').value),'55');assert.equal(await evaluate(()=>document.getElementById('recessDepth').value),'5.5');assert.equal(await evaluate(()=>document.getElementById('thickness').value),'7');
   const pocket=await download('stl'),pocketFaces=stlFaces(pocket),stats=analyzeSTL(pocket);closed(pocketFaces);assert.equal(stats.components,1);assert.ok(Math.abs(stats.dimensions[2]-7.8)<.001);assert.ok(pocketFaces.some(p=>p.every(v=>Math.abs(v[2]-5.5)<.0001)),'the pocket has a real ceiling at 5.5 mm');
   const native=await download('3mf'),nativeModel=geometry(native);assert.deepEqual(nativeModel.triangles,pocketFaces);const palette=JSON.parse(strFromU8(nativeModel.files['Metadata/project_settings.config'])).filament_colour;

@@ -112,7 +112,7 @@ function uniformRectangle(paint,minX,minY,maxX,maxY,bit){
 export function paintFacet(points,frame,paint,budget={nodes:0}){
   if(!paint.map)return filamentCode(0);
   if(!frame||frame.n!==paint.width||![frame.scale,frame.cx,frame.cy].every(Number.isFinite)||frame.scale<=0)throw Error('The SVG filament colors have an invalid placement.');
-  const project=point=>[point[0]/frame.scale+frame.cx,frame.cy-point[1]/frame.scale];
+  const project=point=>[point[0]/frame.scale+frame.cx,frame.cy-(frame.flipY?-point[1]:point[1])/frame.scale];
   const sample=(x,y)=>paint.map[Math.max(0,Math.min(paint.width-1,Math.floor(y)))*paint.width+Math.max(0,Math.min(paint.width-1,Math.floor(x)))];
   const midpoint=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
   // Quarter-millimeter paint precision; independent of the geometry sampling.

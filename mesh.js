@@ -5,6 +5,7 @@ import { hourNumeralPolygons } from './hour-numerals.js';
 import { artworkRelief,artworkFrame,usesSVGBacking,backingDepth,artworkSurfaceHeight } from './svg-details.js';
 import {autoHourFit,fitHourLayout,fittedHourPolygons} from './hour-layout.js';
 import {withMechanismRecess} from './mechanism-recess.js';
+import {raisedMechanismBox,flatMechanismBox,withMechanismBox} from './mechanism-box.js';
 
 const CURVE_ERROR = .02;
 const snap = value => Math.round(value*1e6)/1e6;
@@ -127,7 +128,8 @@ export function buildClockLayers(alpha,n,settings,progress=()=>{},artwork=null) 
   ]:[{height:thickness,polygons:base}];
   progress('details');
   const detailed=!!artwork?.rgba&&settings.design==='custom'&&settings.svgDetail!=='silhouette';
-  const finish=()=>withMechanismRecess(layers,settings,opening);
+  const finish=()=>raisedMechanismBox(settings)?withMechanismBox(layers,settings,opening):withMechanismRecess(layers,settings,opening);
+  if(flatMechanismBox(settings))return finish();
   if(texture==='smooth'&&!markers&&!detailed)return finish();
   const rimPixels=Math.max(1,Math.ceil(.3/frame.scale));
   const detailOutline=silhouette(insetAlpha(alpha,n,rimPixels),n,diameter,frame).polygons;

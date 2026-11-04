@@ -1,4 +1,5 @@
 import { strToU8, zipSync } from 'fflate';
+import {artworkPixel,paintedTriangle} from './artwork-surface.js';
 
 const CORE_NAMESPACE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
 const MATERIAL_NAMESPACE = 'http://schemas.microsoft.com/3dmanufacturing/material/2015/02';
@@ -65,8 +66,7 @@ export function stlTo3MF(buffer, { name = 'Clock Factory', color = '#C47F62', ar
       vertexIds.set(key, index);
       vertices.push(`<vertex x="${point[0]}" y="${point[1]}" z="${point[2]}"/>`);
       if(artwork){
-        const {scale,cx,cy,n}=artwork.frame;
-        const u=(point[0]/scale+cx)/n,v=1-(cy-point[1]/scale)/n;
+        const pixel=artworkPixel(point,artwork.frame),u=pixel[0]/artwork.frame.n,v=1-pixel[1]/artwork.frame.n;
         textureCoordinates.push(`<m:tex2coord u="${u}" v="${v}"/>`);
       }
     }
@@ -82,7 +82,7 @@ export function stlTo3MF(buffer, { name = 'Clock Factory', color = '#C47F62', ar
       throw new RangeError('The printable mesh contains an empty triangle.');
     }
     const indices = points.map(vertex);
-    const painted=artwork&&points.every(point=>point[2]>=artwork.thickness-1e-5);
+    const painted=paintedTriangle(points,artwork);
     const properties=painted?` pid="4" p1="${indices[0]}" p2="${indices[1]}" p3="${indices[2]}"`:'';
     triangles.push(`<triangle v1="${indices[0]}" v2="${indices[1]}" v3="${indices[2]}"${properties}/>`);
   }

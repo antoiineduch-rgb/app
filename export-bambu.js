@@ -1,6 +1,7 @@
 import {strToU8,zipSync} from 'fflate';
 import {binarySTLTriangles,escapeXML} from './export-3mf.js';
 import {filamentPaint,paintFacet,filamentCode,dominantArtworkColor,recolorFilamentPaint} from './bambu-paint.js';
+import {paintedTriangle} from './artwork-surface.js';
 
 const header='<?xml version="1.0" encoding="UTF-8"?>';
 // Unsliced A1/0.4 project. The native Application prefix is Bambu's required
@@ -19,7 +20,7 @@ export function stlToBambu3MF(buffer,{name='Clock Factory',color='#C47F62',paint
     return id;
   };
   for(const points of binarySTLTriangles(buffer)){
-    const indices=points.map(vertex),painted=painting&&points.every(point=>point[2]>=painting.thickness-1e-5);
+    const indices=points.map(vertex),painted=paintedTriangle(points,painting);
     const code=painted?paintFacet(points,painting.frame,paint,budget):filamentCode(0);
     triangles.push(`<triangle v1="${indices[0]}" v2="${indices[1]}" v3="${indices[2]}" paint_color="${code}"/>`);
   }

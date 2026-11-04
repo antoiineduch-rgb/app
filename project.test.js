@@ -60,3 +60,11 @@ test('automatic hours and measured rear pockets survive project backups and lega
   const restored=parseProject(JSON.stringify(legacy));assert.equal(restored.settings.hourFit,true);assert.equal(restored.settings.mechanismRecess,false);
   for(const patch of [{hourFit:'true'},{mechanismRecess:1},{recessDepth:20},{recessWidth:120}])assert.throws(()=>parseProject(JSON.stringify({...legacy,settings:{...legacy.settings,...patch}})),/project/);
 });
+test('raised mechanism boxes round-trip and existing recessed projects retain their previous geometry',()=>{
+  const settings={...DEFAULT_SETTINGS,mechanismRecess:true,mechanismMount:'box',mechanismWall:2.4,mechanismFlatFront:true};
+  assert.deepEqual(parseProject(serializeProject(settings)).settings,settings);
+  const old=JSON.parse(serializeProject(settings));for(const key of ['mechanismMount','mechanismWall','mechanismFlatFront'])delete old.settings[key];
+  assert.equal(parseProject(JSON.stringify(old)).settings.mechanismMount,'recess');assert.equal(normalizeSettings(old.settings).mechanismMount,'recess');
+  assert.equal(normalizeSettings({mechanismRecess:false}).mechanismMount,'box');
+  for(const patch of [{mechanismMount:'solid'},{mechanismWall:.4},{mechanismFlatFront:'yes'}])assert.throws(()=>parseProject(JSON.stringify({...old,settings:{...old.settings,...patch}})),/project/);
+});

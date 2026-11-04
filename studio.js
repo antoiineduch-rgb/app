@@ -2547,7 +2547,7 @@
   }
 
   // mesh.js
-  var import_polygon_clipping5 = __toESM(require_polygon_clipping_umd(), 1);
+  var import_polygon_clipping6 = __toESM(require_polygon_clipping_umd(), 1);
 
   // contours.js
   var CONTOUR_SEGMENTS = [
@@ -2614,9 +2614,9 @@
     return rings;
   }
   function contourArea(ring) {
-    let area4 = 0;
-    for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) area4 += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
-    return area4 / 2;
+    let area5 = 0;
+    for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) area5 += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
+    return area5 / 2;
   }
   function pointSegmentDistanceSquared(point, a, b) {
     const dx = b[0] - a[0], dy = b[1] - a[1];
@@ -3774,7 +3774,7 @@
     if (![width, height, depth, clearance].every(Number.isFinite) || width < 5 || width > 90 || height < 5 || height > 90 || depth < 0.5 || depth > 8 || clearance < 0 || clearance > 2) throw Error("Rear pocket: choose valid movement dimensions, 0.5–8 mm depth, and 0–2 mm clearance.");
     return { width: width + clearance * 2, height: height + clearance * 2, depth, clearance };
   }
-  function rectangle(width, height, radius) {
+  function movementRectangle(width, height, radius) {
     if (!radius) return [[[-width / 2, -height / 2], [width / 2, -height / 2], [width / 2, height / 2], [-width / 2, height / 2], [-width / 2, -height / 2]]];
     const points = [];
     for (const [x2, y, start] of [[width / 2 - radius, height / 2 - radius, 0], [-width / 2 + radius, height / 2 - radius, 90], [-width / 2 + radius, -height / 2 + radius, 180], [width / 2 - radius, -height / 2 + radius, 270]]) for (let i2 = 0; i2 <= 12; i2++) {
@@ -3795,9 +3795,9 @@
     if (roof > artworkSurfaceHeight(settings) + 1e-6) throw Error(`Rear pocket: leave at least ${RECESS_SKIN} mm of material in front. Increase face/backing thickness to at least ${Number(roof.toFixed(1))} mm or reduce pocket depth.`);
     const support = layers.find((layer) => layer.height >= roof - 1e-6)?.polygons;
     const filled = support?.length ? import_polygon_clipping4.default.union(support, [[shaft]]) : [];
-    const required = [rectangle(width + RECESS_SKIN * 2, height + RECESS_SKIN * 2, 0)];
+    const required = [movementRectangle(width + RECESS_SKIN * 2, height + RECESS_SKIN * 2, 0)];
     if (!filled.length || area2(import_polygon_clipping4.default.difference(required, filled)) > 1e-5) throw Error("Rear pocket: the movement does not fit inside solid material at this depth. Add a thick round backing, reduce the pocket size, or use a shallower recess.");
-    const pocket = [rectangle(width, height, Math.min(1, clearance * 2))], result = [];
+    const pocket = [movementRectangle(width, height, Math.min(1, clearance * 2))], result = [];
     let low = 0;
     for (const layer of layers) {
       if (layer.height <= depth + 1e-7) result.push({ ...layer, polygons: import_polygon_clipping4.default.difference(layer.polygons, pocket) });
@@ -3810,10 +3810,59 @@
     return result;
   }
 
+  // mechanism-box.js
+  var import_polygon_clipping5 = __toESM(require_polygon_clipping_umd(), 1);
+
+  // artwork-surface.js
+  var raisedMechanismBox = (settings) => settings.mechanismRecess === true && settings.mechanismMount === "box";
+  var flatMechanismBox = (settings) => raisedMechanismBox(settings) && settings.mechanismFlatFront !== false;
+  function artworkPlacement(settings, frame) {
+    const flat = flatMechanismBox(settings);
+    return { frame: flat ? { ...frame, flipY: true } : frame, thickness: artworkSurfaceHeight(settings) + (raisedMechanismBox(settings) && !flat ? settings.recessDepth ?? 5.5 : 0), ...flat ? { side: "bottom" } : {} };
+  }
+  function artworkPixel(point, frame) {
+    return [point[0] / frame.scale + frame.cx, frame.cy - (frame.flipY ? -point[1] : point[1]) / frame.scale];
+  }
+  function paintedTriangle(points, artwork) {
+    return !!artwork && points.every((point) => artwork.side === "bottom" ? Math.abs(point[2]) <= 1e-5 : point[2] >= artwork.thickness - 1e-5);
+  }
+
+  // mechanism-box.js
+  function boxDimensions(settings) {
+    let dimensions;
+    try {
+      dimensions = recessDimensions(settings);
+    } catch (error) {
+      throw Error(error.message.replace("Rear pocket:", "Rear box:").replace("depth", "height"));
+    }
+    const wall = settings.mechanismWall ?? 1.6;
+    if (!Number.isFinite(wall) || wall < 1.2 || wall > 4) throw Error("Rear box: choose a wall thickness from 1.2 to 4 mm.");
+    return { ...dimensions, wall, outerWidth: dimensions.width + wall * 2, outerHeight: dimensions.height + wall * 2 };
+  }
+  var area3 = (polygons) => polygons.reduce((sum, p) => sum + p.reduce((part, r, i2) => {
+    let a = 0;
+    for (let j = 0; j < r.length - 1; j++) a += r[j][0] * r[j + 1][1] - r[j + 1][0] * r[j][1];
+    return part + (i2 ? -1 : 1) * Math.abs(a / 2);
+  }, 0), 0);
+  var turnOver = (polygons) => polygons.map((p) => p.map((r) => r.map(([x2, y]) => [x2, -y]).reverse()));
+  function withMechanismBox(layers, settings, shaft) {
+    const { width, height, depth, clearance, wall, outerWidth, outerHeight } = boxDimensions(settings), radius = Math.min(1, clearance * 2);
+    const outer = [movementRectangle(outerWidth, outerHeight, radius + wall)], inside = [movementRectangle(width, height, radius)];
+    const base = layers[0].polygons, filled = import_polygon_clipping5.default.union(base, [[shaft]]);
+    if (area3(import_polygon_clipping5.default.difference(outer, filled)) > 1e-5) throw Error("Rear box: the movement box needs a solid clock face beneath it. Add a round backing or reduce the movement dimensions.");
+    const walls = import_polygon_clipping5.default.difference(outer, inside);
+    if (area3(import_polygon_clipping5.default.intersection(walls, [[shaft]])) > 1e-5) throw Error("Rear box: the movement opening must be large enough to keep the shaft hole clear. Increase the movement width or height.");
+    if (flatMechanismBox(settings)) {
+      const face = artworkSurfaceHeight(settings);
+      return [{ height: face, polygons: turnOver(base) }, { height: face + depth, polygons: turnOver(walls) }];
+    }
+    return [{ height: depth, polygons: walls }, ...layers.map((layer, i2) => ({ ...layer, height: layer.height + depth, ...i2 === 0 ? { closeUnderside: true } : {} }))];
+  }
+
   // mesh.js
   var CURVE_ERROR = 0.02;
   var snap4 = (value) => Math.round(value * 1e6) / 1e6;
-  function area3(ring) {
+  function area4(ring) {
     let sum = 0;
     for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) sum += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
     return sum / 2;
@@ -3827,7 +3876,7 @@
     return inside;
   }
   function closed(ring, positive = true) {
-    if (area3(ring) > 0 !== positive) ring.reverse();
+    if (area4(ring) > 0 !== positive) ring.reverse();
     const points = ring.map(([x2, y]) => [snap4(x2), snap4(y)]);
     return [...points, points[0]];
   }
@@ -3849,7 +3898,7 @@
     frame ||= { scale: diameter / span, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
     const { scale, cx, cy } = frame;
     if (!Number.isFinite(scale) || span <= 0) throw Error("The SVG outline could not be measured.");
-    const rings = source.map((ring) => simplifyRing(ring, CURVE_ERROR / scale).map(([x2, y]) => [(x2 - cx) * scale, (cy - y) * scale])).filter((ring) => ring.length >= 3 && Math.abs(area3(ring)) > 1e-6).map((ring) => ({ ring, size: Math.abs(area3(ring)), depth: 0, parent: null, polygon: null })).sort((a, b) => b.size - a.size);
+    const rings = source.map((ring) => simplifyRing(ring, CURVE_ERROR / scale).map(([x2, y]) => [(x2 - cx) * scale, (cy - y) * scale])).filter((ring) => ring.length >= 3 && Math.abs(area4(ring)) > 1e-6).map((ring) => ({ ring, size: Math.abs(area4(ring)), depth: 0, parent: null, polygon: null })).sort((a, b) => b.size - a.size);
     const result = [];
     for (let i2 = 0; i2 < rings.length; i2++) {
       const entry = rings[i2];
@@ -3924,7 +3973,7 @@
         strips.push([closed(ring)]);
       }
     }
-    return import_polygon_clipping5.default.union(...strips);
+    return import_polygon_clipping6.default.union(...strips);
   }
   function buildClockLayers(alpha, n, settings, progress = () => {
   }, artwork = null) {
@@ -3935,25 +3984,26 @@
     const { polygons: outline, frame } = silhouette(alpha, n, diameter, backed ? artworkFrame(alpha, n, diameter, settings) : null);
     const opening = shaftOpening(hole), automatic = autoHourFit(settings), layout = automatic ? fitHourLayout(alpha, n, frame, settings) : null, fitted = automatic ? fittedHourPolygons(settings, layout) : [];
     if (automatic && layout.missing.length) throw Error("Some hours cannot fit inside this SVG as complete labels. Add a round backing for all 12 hours, reduce the number size, or choose manual placement.");
-    let base = import_polygon_clipping5.default.difference(outline, [[opening]]);
+    let base = import_polygon_clipping6.default.difference(outline, [[opening]]);
     if (!base.length) throw Error("The center opening covers the entire clock face.");
-    if (backed && fitted.length) base = import_polygon_clipping5.default.union(base, fitted);
+    if (backed && fitted.length) base = import_polygon_clipping6.default.union(base, fitted);
     const layers = backed ? [
-      { height: backingDepth(settings), polygons: import_polygon_clipping5.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
+      { height: backingDepth(settings), polygons: import_polygon_clipping6.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
       { height: thickness, polygons: base }
     ] : [{ height: thickness, polygons: base }];
     progress("details");
     const detailed = !!artwork?.rgba && settings.design === "custom" && settings.svgDetail !== "silhouette";
-    const finish = () => withMechanismRecess(layers, settings, opening);
+    const finish = () => raisedMechanismBox(settings) ? withMechanismBox(layers, settings, opening) : withMechanismRecess(layers, settings, opening);
+    if (flatMechanismBox(settings)) return finish();
     if (texture === "smooth" && !markers && !detailed) return finish();
     const rimPixels = Math.max(1, Math.ceil(0.3 / frame.scale));
     const detailOutline = silhouette(insetAlpha(alpha, n, rimPixels), n, diameter, frame).polygons;
-    const detailRegion = detailOutline.length ? import_polygon_clipping5.default.difference(detailOutline, [[circle(hole / 2 + 0.3, 1e-3, 128)]]) : [];
+    const detailRegion = detailOutline.length ? import_polygon_clipping6.default.difference(detailOutline, [[circle(hole / 2 + 0.3, 1e-3, 128)]]) : [];
     const useNumerals = ["arabic", "roman"].includes(settings.hourStyle);
     const markerShapes = markers ? useNumerals ? hourNumeralPolygons(settings) : markerPolygons(diameter) : [];
     const markerOutline = markers && !automatic ? silhouette(insetAlpha(alpha, n, rimPixels + 1), n, diameter, frame).polygons : [];
-    const markerRegion = markerOutline.length ? import_polygon_clipping5.default.difference(markerOutline, [[circle(hole / 2 + 0.3 + frame.scale, 1e-3, 128)]]) : [];
-    const ticks = automatic ? fitted : markers && markerRegion.length ? import_polygon_clipping5.default.intersection(markerRegion, markerShapes) : [];
+    const markerRegion = markerOutline.length ? import_polygon_clipping6.default.difference(markerOutline, [[circle(hole / 2 + 0.3 + frame.scale, 1e-3, 128)]]) : [];
+    const ticks = automatic ? fitted : markers && markerRegion.length ? import_polygon_clipping6.default.intersection(markerRegion, markerShapes) : [];
     if (detailed) {
       const height = settings.svgRelief ?? 0.8;
       if (!Number.isFinite(height) || height < 0 || height > 2) throw Error("SVG relief must be between 0 and 2 mm.");
@@ -3963,9 +4013,9 @@
         const steps = Math.max(1, Math.min(8, Math.round(height / 0.2)));
         for (let level = 1; level <= steps; level++) {
           const region = silhouette(relief, n, diameter, frame, (level - 0.5) * 255 / steps).polygons;
-          const detail = region.length && previous.length ? import_polygon_clipping5.default.intersection(previous, region) : [];
+          const detail = region.length && previous.length ? import_polygon_clipping6.default.intersection(previous, region) : [];
           previous = detail;
-          const raised = ticks.length ? detail.length ? import_polygon_clipping5.default.union(detail, ticks) : ticks : detail;
+          const raised = ticks.length ? detail.length ? import_polygon_clipping6.default.union(detail, ticks) : ticks : detail;
           if (raised.length) {
             top = thickness + height * level / steps;
             layers.push({ height: top, polygons: raised });
@@ -3979,14 +4029,14 @@
       let pattern = texture === "ripple" ? ripplePolygons(diameter) : hatchPolygons(diameter);
       let first = [];
       if (useNumerals && markers) {
-        pattern = import_polygon_clipping5.default.difference(pattern, automatic ? fittedHourPolygons(settings, layout, 0.6) : hourNumeralPolygons(settings, 0.6));
-        const textureArea = detailRegion.length ? import_polygon_clipping5.default.intersection(detailRegion, pattern) : [];
-        first = textureArea.length && ticks.length ? import_polygon_clipping5.default.union(textureArea, ticks) : ticks.length ? ticks : textureArea;
+        pattern = import_polygon_clipping6.default.difference(pattern, automatic ? fittedHourPolygons(settings, layout, 0.6) : hourNumeralPolygons(settings, 0.6));
+        const textureArea = detailRegion.length ? import_polygon_clipping6.default.intersection(detailRegion, pattern) : [];
+        first = textureArea.length && ticks.length ? import_polygon_clipping6.default.union(textureArea, ticks) : ticks.length ? ticks : textureArea;
       } else {
-        const foundation = markers ? import_polygon_clipping5.default.union(pattern, markerPolygons(diameter, 0.15)) : pattern;
-        first = detailRegion.length ? import_polygon_clipping5.default.intersection(detailRegion, foundation) : [];
+        const foundation = markers ? import_polygon_clipping6.default.union(pattern, markerPolygons(diameter, 0.15)) : pattern;
+        first = detailRegion.length ? import_polygon_clipping6.default.intersection(detailRegion, foundation) : [];
       }
-      if (automatic && ticks.length) first = first.length ? import_polygon_clipping5.default.union(first, ticks) : ticks;
+      if (automatic && ticks.length) first = first.length ? import_polygon_clipping6.default.union(first, ticks) : ticks;
       if (first.length) layers.push({ height: thickness + 0.4, polygons: first });
     }
     if (ticks.length) layers.push({ height: thickness + 0.8, polygons: ticks });
@@ -4760,8 +4810,7 @@
         vertexIds.set(key, index);
         vertices.push(`<vertex x="${point[0]}" y="${point[1]}" z="${point[2]}"/>`);
         if (artwork) {
-          const { scale, cx, cy, n } = artwork.frame;
-          const u = (point[0] / scale + cx) / n, v = 1 - (cy - point[1] / scale) / n;
+          const pixel = artworkPixel(point, artwork.frame), u = pixel[0] / artwork.frame.n, v = 1 - pixel[1] / artwork.frame.n;
           textureCoordinates.push(`<m:tex2coord u="${u}" v="${v}"/>`);
         }
       }
@@ -4777,7 +4826,7 @@
         throw new RangeError("The printable mesh contains an empty triangle.");
       }
       const indices = points.map(vertex);
-      const painted = artwork && points.every((point) => point[2] >= artwork.thickness - 1e-5);
+      const painted = paintedTriangle(points, artwork);
       const properties = painted ? ` pid="4" p1="${indices[0]}" p2="${indices[1]}" p3="${indices[2]}"` : "";
       triangles.push(`<triangle v1="${indices[0]}" v2="${indices[1]}" v3="${indices[2]}"${properties}/>`);
     }
@@ -4984,7 +5033,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   function paintFacet(points, frame, paint, budget = { nodes: 0 }) {
     if (!paint.map) return filamentCode(0);
     if (!frame || frame.n !== paint.width || ![frame.scale, frame.cx, frame.cy].every(Number.isFinite) || frame.scale <= 0) throw Error("The SVG filament colors have an invalid placement.");
-    const project = (point) => [point[0] / frame.scale + frame.cx, frame.cy - point[1] / frame.scale];
+    const project = (point) => [point[0] / frame.scale + frame.cx, frame.cy - (frame.flipY ? -point[1] : point[1]) / frame.scale];
     const sample = (x2, y) => paint.map[Math.max(0, Math.min(paint.width - 1, Math.floor(y))) * paint.width + Math.max(0, Math.min(paint.width - 1, Math.floor(x2)))];
     const midpoint = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     const tolerance = 0.25 / frame.scale;
@@ -5028,7 +5077,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       return id;
     };
     for (const points of binarySTLTriangles(buffer)) {
-      const indices = points.map(vertex), painted = painting && points.every((point) => point[2] >= painting.thickness - 1e-5);
+      const indices = points.map(vertex), painted = paintedTriangle(points, painting);
       const code = painted ? paintFacet(points, painting.frame, paint, budget) : filamentCode(0);
       triangles.push(`<triangle v1="${indices[0]}" v2="${indices[1]}" v3="${indices[2]}" paint_color="${code}"/>`);
     }
@@ -5048,9 +5097,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
 
   // project.js
   var MAX_PROJECT_BYTES = 12 * 1024 * 1024;
-  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}), svgBacking: false, svgBackingThickness: 1.2, svgBackingMargin: 3, hourFit: true, mechanismRecess: false, recessWidth: 55, recessHeight: 55, recessDepth: 5.5, recessClearance: 0.5 });
-  var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] };
-  var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.1], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2], svgBackingThickness: [1, 10, 0.2], svgBackingMargin: [1, 12, 0.5], recessWidth: [5, 90, 0.5], recessHeight: [5, 90, 0.5], recessDepth: [0.5, 8, 0.1], recessClearance: [0, 2, 0.1] };
+  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}), svgBacking: false, svgBackingThickness: 1.2, svgBackingMargin: 3, hourFit: true, mechanismRecess: false, recessWidth: 55, recessHeight: 55, recessDepth: 5.5, recessClearance: 0.5, mechanismMount: "box", mechanismWall: 1.6, mechanismFlatFront: true });
+  var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"], mechanismMount: ["box", "recess"] };
+  var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.1], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2], svgBackingThickness: [1, 10, 0.2], svgBackingMargin: [1, 12, 0.5], recessWidth: [5, 90, 0.5], recessHeight: [5, 90, 0.5], recessDepth: [0.5, 8, 0.1], recessClearance: [0, 2, 0.1], mechanismWall: [1.2, 4, 0.2] };
   var bytes = (value) => new TextEncoder().encode(value).byteLength;
   var record2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   function projectName(value) {
@@ -5065,7 +5114,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       const value = Number(input[key]);
       if (input[key] != null && Number.isFinite(value)) settings[key] = Number(Math.min(max, Math.max(min, Math.round(value / step) * step)).toFixed(5));
     }
-    for (const key of ["markers", "showHands", "svgBacking", "hourFit", "mechanismRecess"]) if (typeof input[key] === "boolean") settings[key] = input[key];
+    for (const key of ["markers", "showHands", "svgBacking", "hourFit", "mechanismRecess", "mechanismFlatFront"]) if (typeof input[key] === "boolean") settings[key] = input[key];
+    if (input.mechanismRecess === true && input.mechanismMount === void 0) settings.mechanismMount = "recess";
     return settings;
   }
   function checkedArtwork(value) {
@@ -5089,7 +5139,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       const value = data.settings[key];
       if (value !== void 0 && (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max || Math.abs(value / step - Math.round(value / step)) > 1e-6)) throw Error(`The project has an invalid ${key} setting.`);
     }
-    for (const key of ["markers", "showHands", "svgBacking", "hourFit", "mechanismRecess"]) if (data.settings[key] !== void 0 && typeof data.settings[key] !== "boolean") throw Error(`The project has an invalid ${key} setting.`);
+    for (const key of ["markers", "showHands", "svgBacking", "hourFit", "mechanismRecess", "mechanismFlatFront"]) if (data.settings[key] !== void 0 && typeof data.settings[key] !== "boolean") throw Error(`The project has an invalid ${key} setting.`);
     if (data.settings.bambuColors !== void 0 && !validFilamentOverrides(data.settings.bambuColors)) throw Error("The project has invalid filament colors.");
     const settings = normalizeSettings(data.settings), artwork = checkedArtwork(data.artwork), orientation = normalizeOrientation(data.orientation);
     if (settings.design === "custom" && !artwork) throw Error("The project is missing its imported SVG.");
@@ -5498,7 +5548,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   };
 
   // hole-fit.js
-  var import_polygon_clipping6 = __toESM(require_polygon_clipping_umd(), 1);
+  var import_polygon_clipping7 = __toESM(require_polygon_clipping_umd(), 1);
   var round = (value) => Math.round(value * 1e6) / 1e6;
   var DIGITS = ["abcdef", "bc", "abdeg", "abcdg", "bcfg", "acdfg", "acdefg", "abc", "abcdefg", "abcdfg"];
   var SEGMENTS = { a: [0.25, 3.6, 2.25, 4.2], b: [1.9, 1.9, 2.5, 4], c: [1.9, 0.2, 2.5, 2.3], d: [0.25, 0, 2.25, 0.6], e: [0, 0.2, 0.6, 2.3], f: [0, 1.9, 0.6, 4], g: [0.25, 1.8, 2.25, 2.4] };
@@ -5513,7 +5563,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       offset += (char === "." ? 0.7 : 2.5) + 0.8;
     }
-    return import_polygon_clipping6.default.union(...rectangles);
+    return import_polygon_clipping7.default.union(...rectangles);
   }
   function roundedRectangle(width, height) {
     const radius = 3, ring = [];
@@ -5529,12 +5579,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const sizes = Array.from({ length: 5 }, (_, i2) => (first + i2 * 2) / 10), largest = sizes.at(-1), cell = largest + 6, width = round(cell * 5 + 8), depth = round(largest + 14), thickness = 2, relief = 0.6;
     const holes = sizes.map((diameter, i2) => ({ diameter, x: round(-width / 2 + 4 + cell * (i2 + 0.5)), y: 3.5 }));
     const outline = roundedRectangle(width, depth), openings = holes.map(({ diameter, x: x2, y }) => [shaftOpening(diameter).map(([px, py]) => [round(px + x2), round(py + y)])]);
-    const base = import_polygon_clipping6.default.difference([[outline]], ...openings);
+    const base = import_polygon_clipping7.default.difference([[outline]], ...openings);
     const labels = holes.map(({ diameter, x: x2 }) => ({ text: diameter.toFixed(1), polygons: labelPolygons(diameter.toFixed(1), x2, -depth / 2 + 4) }));
     return { center, sizes, width, depth, thickness, relief, holes, base, labels };
   }
   function makeFitTestSTL(center) {
-    const plan = fitTestPlan(center), letters = import_polygon_clipping6.default.union(...plan.labels.map((label) => label.polygons));
+    const plan = fitTestPlan(center), letters = import_polygon_clipping7.default.union(...plan.labels.map((label) => label.polygons));
     return extrudeLayers([{ height: plan.thickness, polygons: plan.base }, { height: plan.thickness + plan.relief, polygons: letters }]);
   }
 
@@ -5784,7 +5834,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return settings.design === "custom" && settings.svgDetail === "artwork";
   }
   function geometryKey(settings = state) {
-    return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone, settings.svgBacking, settings.svgBacking ? [settings.svgBackingThickness, settings.svgBackingMargin] : null, settings.hourFit] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? settings.hourStyle : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null, settings.mechanismRecess ? [settings.recessWidth, settings.recessHeight, settings.recessDepth, settings.recessClearance] : false]);
+    return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone, settings.svgBacking, settings.svgBacking ? [settings.svgBackingThickness, settings.svgBackingMargin] : null, settings.hourFit] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? settings.hourStyle : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null, settings.mechanismRecess ? [settings.mechanismMount, settings.mechanismFlatFront, settings.mechanismWall, settings.recessWidth, settings.recessHeight, settings.recessDepth, settings.recessClearance] : false]);
   }
   function fileKey(settings = state) {
     return JSON.stringify([geometryKey(settings), settings.exportFormat, settings.exportFormat === "3mf" ? [colors[settings.color][1], settings.threeMFTarget, settings.threeMFTarget === "bambu-a1" ? [settings.filamentCount, settings.bambuBackColor, Object.entries(settings.bambuColors).sort()] : null] : null]);
@@ -5834,8 +5884,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return usesSVGBacking(state) ? `<g transform="${backingViewTransform()}">${markup}</g>` : markup;
   }
   function render({ forceInputs = false, historyGroup = null, recordHistory = true } = {}) {
-    const color = colors[state.color][1], detailed = originalArtwork(), backed = usesSVGBacking(state);
-    const nextPreviewKey = JSON.stringify([state.design, state.color, state.texture, state.markers, state.hourStyle, state.numberSize, state.numberPosition, state.diameter, state.svgDetail, customRevision, artworkOrientation, backed, state.hourFit, backed || autoHourFit(state) ? [state.svgBackingMargin, state.hole] : null]);
+    const color = colors[state.color][1], detailed = originalArtwork(), backed = usesSVGBacking(state), flat = flatMechanismBox(state), visibleTexture = flat ? "smooth" : state.texture;
+    const nextPreviewKey = JSON.stringify([state.design, state.color, visibleTexture, state.markers, state.hourStyle, state.numberSize, state.numberPosition, state.diameter, state.svgDetail, customRevision, artworkOrientation, backed, state.hourFit, backed || autoHourFit(state) ? [state.svgBackingMargin, state.hole] : null]);
     if (nextPreviewKey !== previewKey) {
       let ticks = "", numberClearance = "";
       if (state.markers && state.hourStyle !== "ticks") {
@@ -5850,7 +5900,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         ticks = `<g id="hourOverlay" fill="#f5e5cd"><g${state.hourStyle !== "ticks" ? ' id="hourNumerals"' : ""}>${markup}</g></g>`;
         if (state.hourStyle !== "ticks") numberClearance = `<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2 * (backed ? 360 / state.diameter : 400 / (n * frame.scale))}" stroke-linejoin="round">${markup}</g></mask>`;
       }
-      $("clockSvg").innerHTML = `<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance ? ' mask="url(#numberClearanceMask)"' : ""}>${state.texture === "ripple" ? Array.from({ length: 44 }, (_, i2) => `<circle cx="200" cy="200" r="${12 + i2 * 4}" fill="none" stroke="${i2 % 2 ? "#fff0da" : "#774832"}" stroke-opacity="${i2 % 2 ? ".18" : ".23"}" stroke-width=".8"/>`).join("") : state.texture === "grain" ? '<rect width="400" height="400" fill="url(#ridges)"/>' : ""}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g id="previewHands" style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
+      $("clockSvg").innerHTML = `<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance ? ' mask="url(#numberClearanceMask)"' : ""}>${visibleTexture === "ripple" ? Array.from({ length: 44 }, (_, i2) => `<circle cx="200" cy="200" r="${12 + i2 * 4}" fill="none" stroke="${i2 % 2 ? "#fff0da" : "#774832"}" stroke-opacity="${i2 % 2 ? ".18" : ".23"}" stroke-width=".8"/>`).join("") : visibleTexture === "grain" ? '<rect width="400" height="400" fill="url(#ridges)"/>' : ""}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g id="previewHands" style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
       if (detailed) {
         const painted = document.createElementNS("http://www.w3.org/2000/svg", "g");
         painted.id = "originalArtwork";
@@ -5905,9 +5955,10 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("diameter").setAttribute("aria-valuetext", `${state.diameter / 10} centimeters across`);
     $("colorName").textContent = colors[state.color][0];
     $("measure").textContent = state.diameter + " mm";
-    $("exportSize").textContent = `${state.diameter} mm across · ${Number(artworkSurfaceHeight(state).toFixed(1))} mm ${backed ? "base + backing" : "base"}`;
+    $("exportSize").textContent = `${state.diameter} mm across · ${Number(artworkSurfaceHeight(state).toFixed(1))} mm ${backed ? "base + backing" : "base"}${raisedMechanismBox(state) ? " + " + state.recessDepth + " mm rear box" : ""}`;
     $("thicknessLabelText").textContent = backed ? "Artwork thickness" : "Base thickness";
     $("fitHint").textContent = `The threaded shaft must pass through the face and leave room for the nut.${backed ? " The backing adds " + backingDepth(state) + " mm below the artwork; include it and any relief when checking shaft length." : ""}`;
+    if (raisedMechanismBox(state)) $("fitHint").textContent = `The movement rests on the back of the ${Number(artworkSurfaceHeight(state).toFixed(1))} mm face. The box walls add height behind it; they do not add to the thickness the shaft passes through. Leave room for the washer and nut.`;
     $("svgBacking").checked = state.svgBacking;
     $("svgBackingOptions").hidden = !state.svgBacking;
     for (const id of ["svgBackingThickness", "svgBackingMargin"]) {
@@ -5930,17 +5981,18 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("hourFitStatus").dataset.tone = fitted?.missing.length ? "warning" : "success";
     $("backingForHours").hidden = !fitted?.missing.length;
     $("numeralOptions").hidden = !state.markers || state.hourStyle === "ticks";
+    $("numberPrintHelp").textContent = flat ? "Numbers stay upright and use flat color in 3MF. Turn off “Flat front on bed” to restore raised numbers." : "Numbers stay upright and print in relief. SVG fitting adjusts their size and distance when needed; turn it off for manual placement.";
     for (const id of ["numberSize", "numberPosition"]) {
       $(id).value = state[id];
       $(id + "Value").textContent = state[id];
     }
     $("svgDetailControls").hidden = state.design !== "custom";
     $("svgDetail").value = state.svgDetail;
-    $("svgReliefControls").hidden = !detailed;
+    $("svgReliefControls").hidden = !detailed || flat;
     $("svgRelief").value = state.svgRelief;
     $("svgReliefValue").textContent = state.svgRelief.toFixed(1);
     $("svgTone").value = state.svgTone;
-    $("texture").hidden = $("textureLabel").hidden = detailed;
+    $("texture").hidden = $("textureLabel").hidden = detailed || flat;
     $("faceColorHint").textContent = detailed ? "Your SVG keeps its original colors. This filament color is used for the back and edges." : "A preview of your filament color. Choose the matching filament when you print.";
     if (detailed && state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1" && state.bambuBackColor === "background") $("faceColorHint").textContent = "The back starts with the SVG background color. Adjust it in “See your print colors”, or choose “Use selected face color” in the export options to use this swatch.";
     updateExportFormatUI();
@@ -5955,14 +6007,23 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     if (hands) hands.toggleAttribute("hidden", !state.showHands);
     $("mechanismRecess").checked = state.mechanismRecess;
     $("recessOptions").hidden = !state.mechanismRecess;
-    for (const id of ["recessWidth", "recessHeight", "recessDepth", "recessClearance"]) if (forceInputs || document.activeElement !== $(id) && !$(id).dataset.editing) {
+    $("mechanismMount").value = state.mechanismMount;
+    $("mechanismFlatFront").checked = state.mechanismFlatFront;
+    const box = state.mechanismMount === "box";
+    for (const id of ["recessWidth", "recessHeight", "recessDepth", "recessClearance", "mechanismWall"]) if (forceInputs || document.activeElement !== $(id) && !$(id).dataset.editing) {
       $(id).value = state[id];
       if (forceInputs) delete $(id).dataset.editing;
     }
-    const pocket = recessDimensions(state);
-    $("recessSummary").textContent = `Pocket: ${pocket.width} × ${pocket.height} mm · ${pocket.depth} mm deep. Keeps at least ${RECESS_SKIN} mm of front material. Verify your movement dimensions before printing.`;
-    $("supportBadge").textContent = state.mechanismRecess ? "Rear pocket · check supports" : "No supports needed";
-    $("printabilitySummary").textContent = state.mechanismRecess ? "Rear pocket · review orientation and supports" : "✓ Flat back · no supports needed";
+    $("boxWallControl").hidden = $("flatFrontControl").hidden = !box;
+    $("flatFrontHelp").hidden = !box;
+    $("flatFrontHelp").textContent = state.mechanismFlatFront ? "Keeps SVG colors and numbers flat in color 3MF. Raised front details are paused; STL contains the shape and box only." : "Raised front details are retained. Turn this on for a flat front against the print bed, with flat color artwork and numbers.";
+    $("recessDepthLabel").textContent = box ? "Box height · mm" : "Pocket depth · mm";
+    $("mountHelp").textContent = box ? "Adds four walls on the back, open at the top. The clock face stays at your chosen thickness." : "Cuts a pocket into the back. Enabling it thickens the face or backing enough to retain 1.2 mm of front material.";
+    const pocket = box ? boxDimensions(state) : recessDimensions(state), mm = (value) => Number(value.toFixed(2));
+    $("recessSummary").textContent = box ? `Box: ${mm(pocket.width)} × ${mm(pocket.height)} mm inside · ${pocket.depth} mm high · ${pocket.wall} mm walls. Outside: ${mm(pocket.outerWidth)} × ${mm(pocket.outerHeight)} mm. Verify your movement dimensions before printing.` : `Pocket: ${pocket.width} × ${pocket.height} mm · ${pocket.depth} mm deep. Keeps at least ${RECESS_SKIN} mm of front material. Verify your movement dimensions before printing.`;
+    $("mountPrintHelp").textContent = flat ? "Use Print mesh → Back to inspect the open box. Export is already front-down with the walls pointing up." : box ? "Use Print mesh → Back to inspect the box. Raised front details need a suitable print orientation and may need supports." : "Use Print mesh → Back to inspect it. The rear pocket may need supports; check orientation and bridging in your slicer.";
+    $("supportBadge").textContent = flat ? "Flat front · box walls up" : state.mechanismRecess ? box ? "Rear box · check supports" : "Rear pocket · check supports" : "No supports needed";
+    $("printabilitySummary").textContent = flat ? "✓ Flat front on bed · open box grows upward" : state.mechanismRecess ? "Mechanism mount · review orientation and supports" : "✓ Flat back · no supports needed";
     updateArtworkUI();
     validateDimensions();
     persist();
@@ -6103,16 +6164,17 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     state.texture = b.dataset.texture;
     render();
   });
+  var mountFields = () => ["recessWidth", "recessHeight", "recessDepth", "recessClearance", ...state.mechanismMount === "box" ? ["mechanismWall"] : []];
   function validateDimensions(focus = false) {
-    const ids = ["diameterNumber", "thickness", "hole", ...state.mechanismRecess ? ["recessWidth", "recessHeight", "recessDepth", "recessClearance"] : []], invalid = ids.map($).find((input) => input.value === "" || !input.validity.valid);
+    const ids = ["diameterNumber", "thickness", "hole", ...state.mechanismRecess ? mountFields() : []], invalid = ids.map($).find((input) => input.value === "" || !input.validity.valid);
     for (const id of ids) $(id).setAttribute("aria-invalid", String($(id).value === "" || !$(id).validity.valid));
-    $("dimensionError").hidden = !invalid || invalid.id === "diameterNumber" || invalid.id.startsWith("recess");
+    $("dimensionError").hidden = !invalid || invalid.id === "diameterNumber" || mountFields().includes(invalid.id);
     $("sizeError").hidden = !invalid || invalid.id !== "diameterNumber";
     if (invalid) {
       const size = invalid.id === "diameterNumber";
-      if (invalid.id.startsWith("recess")) {
+      if (mountFields().includes(invalid.id)) {
         $("recessError").hidden = false;
-        $("recessError").textContent = "Rear pocket: enter dimensions within the displayed ranges and steps.";
+        $("recessError").textContent = "Mechanism mount: enter dimensions within the displayed ranges and steps.";
       } else $(size ? "sizeError" : "dimensionError").textContent = size ? "Enter a diameter from 100 to 300 mm, in steps of 1 mm." : invalid.id === "hole" ? "Enter a center hole from 5 to 15 mm, in steps of 0.1 mm." : "Enter a face thickness from 2 to 10 mm, in steps of 0.5 mm.";
       if (focus) {
         if (!size) document.querySelector(".advanced-settings").open = true;
@@ -6133,7 +6195,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     if (validateDimensions()) delete $("diameterNumber").dataset.editing;
   });
   function makeRecessRoom() {
-    if (!state.mechanismRecess) return;
+    if (!state.mechanismRecess || raisedMechanismBox(state)) return;
     const required = state.recessDepth + RECESS_SKIN;
     if (usesSVGBacking(state)) state.svgBackingThickness = Math.max(state.svgBackingThickness, Math.ceil((required - 1e-7) * 5) / 5);
     else {
@@ -6149,9 +6211,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   }
   $("backingForHours").onclick = enableSupportingBacking;
   $("backingForRecess").onclick = enableSupportingBacking;
-  ["diameter", "thickness", "hole", "markers", "svgBacking", "hourFit", "mechanismRecess"].forEach((id) => $(id).addEventListener("input", () => {
+  ["diameter", "thickness", "hole", "markers", "svgBacking", "hourFit", "mechanismRecess", "mechanismFlatFront"].forEach((id) => $(id).addEventListener("input", () => {
     const input = $(id);
-    if (["markers", "svgBacking", "hourFit", "mechanismRecess"].includes(id)) {
+    if (["markers", "svgBacking", "hourFit", "mechanismRecess", "mechanismFlatFront"].includes(id)) {
       state[id] = input.checked;
       if ((id === "mechanismRecess" || id === "svgBacking") && input.checked) makeRecessRoom();
     } else {
@@ -6163,9 +6225,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       state[id] = Number(input.value);
     }
     validateDimensions();
-    render({ historyGroup: ["markers", "svgBacking", "hourFit", "mechanismRecess"].includes(id) ? null : id });
+    render({ historyGroup: ["markers", "svgBacking", "hourFit", "mechanismRecess", "mechanismFlatFront"].includes(id) ? null : id });
   }));
-  for (const id of ["recessWidth", "recessHeight", "recessDepth", "recessClearance"]) $(id).addEventListener("input", () => {
+  for (const id of ["recessWidth", "recessHeight", "recessDepth", "recessClearance", "mechanismWall"]) $(id).addEventListener("input", () => {
     $(id).dataset.editing = "true";
     $(id).setAttribute("aria-invalid", String($(id).value === "" || !$(id).validity.valid));
     if ($(id).value === "" || !$(id).validity.valid) {
@@ -6176,16 +6238,17 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     if (id === "recessDepth") makeRecessRoom();
     render({ historyGroup: id });
   });
-  for (const id of ["recessWidth", "recessHeight", "recessDepth", "recessClearance"]) $(id).addEventListener("blur", () => {
+  for (const id of ["recessWidth", "recessHeight", "recessDepth", "recessClearance", "mechanismWall"]) $(id).addEventListener("blur", () => {
     if ($(id).value !== "" && $(id).validity.valid) {
       delete $(id).dataset.editing;
       $(id).value = state[id];
     }
   });
-  for (const id of ["hourStyle", "exportFormat", "svgDetail", "svgTone", "threeMFTarget", "filamentCount", "bambuBackColor"]) $(id).addEventListener("change", () => {
-    const value = id === "filamentCount" ? Number($(id).value) : $(id).value, allowed = { hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"] }[id];
+  for (const id of ["hourStyle", "exportFormat", "svgDetail", "svgTone", "threeMFTarget", "filamentCount", "bambuBackColor", "mechanismMount"]) $(id).addEventListener("change", () => {
+    const value = id === "filamentCount" ? Number($(id).value) : $(id).value, allowed = { hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"], mechanismMount: ["box", "recess"] }[id];
     if (!allowed.includes(value)) return;
     state[id] = value;
+    if (id === "mechanismMount") makeRecessRoom();
     render();
   });
   for (const id of ["numberSize", "numberPosition", "svgRelief", "svgBackingThickness", "svgBackingMargin"]) $(id).addEventListener("input", () => {
@@ -6198,6 +6261,9 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("exportFormat").value = state.exportFormat;
     const bambu = state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1";
     const single = state.exportFormat === "stl";
+    const flat = flatMechanismBox(state);
+    $("flatFrontNotice").hidden = !flat;
+    $("flatFrontNotice").textContent = "Flat front on bed: SVG colors and hour numbers stay flat in color 3MF. STL contains the outline and rear box; front relief is paused.";
     for (const [id, selected] of [["singleColorPrint", single], ["bambuColorPrint", bambu]]) {
       $(id).classList.toggle("selected", selected);
       $(id).setAttribute("aria-pressed", String(selected));
@@ -6213,6 +6279,10 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("bambuBackColor").value = state.bambuBackColor;
     $("bambuOptions").hidden = !bambu;
     if (bambu) $("exportFormatHint").textContent = "Open the .3mf as a project in Bambu Studio. Check your A1 0.4 mm and filament presets, then map the numbered colors to your AMS spools before slicing.";
+    if (flat && single) {
+      $("printModeHint").textContent = "A flat face and raised rear box in one piece. Use Bambu A1 · colors to print the SVG artwork and hour numbers in color.";
+      $("exportFormatHint").textContent = "STL contains the outline and open rear box. Flat SVG artwork and numbers need a color 3MF; raised front details are paused for bed contact.";
+    } else if (flat && !bambu) $("exportFormatHint").textContent = "3MF keeps the flat SVG artwork and numbers as a color texture. Export is front-down with the rear box pointing up. Texture support depends on your slicer.";
     showFilamentPalette(exportCache?.key === fileKey() ? exportCache.palette : null);
     updateFilamentPreview();
     if (!exportController) $("export").innerHTML = `Download ${format} <span>↓</span>`;
@@ -6279,7 +6349,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   function meshCamera(mode) {
     meshCameraView = mode;
     meshView?.setView(mode);
-    $("meshBed").disabled = mode === "back";
+    $("meshBed").disabled = mode === (flatMechanismBox(state) ? "front" : "back");
     for (const [id, view2] of [["frontView", "front"], ["angleView", "angle"], ["backView", "back"]]) $(id).classList.toggle("selected", mode === view2);
   }
   $("frontView").onclick = () => {
@@ -6716,10 +6786,10 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const steps = bambu ? [
       "Open the .3mf in Bambu Studio and choose “Open as project” to load its colors.",
       "Choose your actual filament presets and match each numbered color to an AMS spool.",
-      settings.mechanismRecess ? "Inspect the rear pocket, print orientation and supports; review flushing volumes, then slice and print." : "Check the flat side is on the plate, review flushing volumes, then slice and print."
+      flatMechanismBox(settings) ? "Keep the flat front on the plate and the open box pointing up; review flushing volumes, then slice and print." : settings.mechanismRecess ? "Inspect the rear mount, print orientation and supports; review flushing volumes, then slice and print." : "Check the flat side is on the plate, review flushing volumes, then slice and print."
     ] : [
       `Open the .${settings.exportFormat} file in your printer’s slicer.`,
-      settings.mechanismRecess ? "Review the rear pocket, print orientation and support settings in your slicer." : "Place the flat side on the print bed and check the dimensions.",
+      flatMechanismBox(settings) ? "Keep the flat front on the print bed, with the open box pointing up. Check the dimensions." : settings.mechanismRecess ? "Review the rear mount, print orientation and support settings in your slicer." : "Place the flat side on the print bed and check the dimensions.",
       "Slice and print, then fit your clock movement and hands."
     ];
     $("downloadSteps").replaceChildren(...steps.map((text) => {
@@ -6728,6 +6798,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       return item;
     }));
     $("downloadNote").textContent = bambu ? "A1 · 0.4 mm nozzle. Up to 4 colors with one AMS Lite. Reopen your .clock project in Clock Factory to edit the design." : settings.exportFormat === "stl" ? "STL contains the shape and raised details. For colored SVG artwork on your A1, choose Bambu A1 · colors above." : "Standard 3MF contains a color texture. For AMS filament assignments, choose Bambu A1 · colors above.";
+    if (flatMechanismBox(settings) && settings.exportFormat === "stl") $("downloadNote").textContent = "STL contains the flat clock shape and rear box. Choose Bambu A1 · colors to keep flat SVG artwork and hour numbers in the print.";
     toast(fileKey() === key ? "Your print file is ready. Next steps are below the download button." : `Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
   }
   function paintHourDetails(context, settings, frame = null, layout = null) {
@@ -6822,11 +6893,11 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         stage("outline");
         const raw = sourceRaster(snapshot);
         let artwork = null;
-        if (originalArtwork(settings)) {
+        if (originalArtwork(settings) || flatMechanismBox(settings)) {
           const paint = paintedRaster(snapshot, raw), png = await new Promise((resolve) => paint.canvas.toBlob(resolve, "image/png"));
           jobSignal.throwIfAborted();
           if (!png) throw Error("The SVG color artwork could not be prepared.");
-          artwork = { rgba: raw.rgba, texture: { png: new Uint8Array(await png.arrayBuffer()), frame: paint.frame, thickness: artworkSurfaceHeight(settings) } };
+          artwork = { rgba: raw.rgba, texture: { png: new Uint8Array(await png.arrayBuffer()), ...artworkPlacement(settings, paint.frame) } };
         }
         jobSignal.throwIfAborted();
         const mesh = await meshAsync(raw.alpha, raw.n, { ...settings, exportFormat: "stl" }, jobSignal, null, artwork, stage);
@@ -6845,7 +6916,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   }
   function prepareFilamentRaster(snapshot) {
     const paint = paintedRaster(snapshot);
-    return { rgba: paint.rgba, width: paint.n, height: paint.n, frame: paint.frame, thickness: artworkSurfaceHeight(snapshot.settings) };
+    return { rgba: paint.rgba, width: paint.n, height: paint.n, ...artworkPlacement(snapshot.settings, paint.frame) };
   }
   function updateFilamentPreview() {
     const snapshot = designSnapshot(), settings = snapshot.settings;
@@ -6862,11 +6933,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("printCheckStatus").textContent = stats ? stats.components > 1 ? `${stats.components} separate pieces. Plan a backing or assembly before printing.` : "Closed print mesh checked. Add the movement and hands after printing." : "Check the model to see its exact dimensions, relief, and separate parts.";
     $("printCheckStatus").dataset.tone = stats ? stats.components > 1 ? "warning" : "success" : "neutral";
     $("printCheckStatus").dataset.checked = String(!!stats);
-    const invalidPocket = state.mechanismRecess && ["recessWidth", "recessHeight", "recessDepth", "recessClearance"].some((id) => $(id).value === "" || !$(id).validity.valid);
-    const pocketError = invalidPocket ? "Rear pocket: enter dimensions within the displayed ranges and steps." : state.mechanismRecess && lastGeometryError?.key === key && lastGeometryError.message.startsWith("Rear pocket:") ? lastGeometryError.message : null;
+    const invalidPocket = state.mechanismRecess && mountFields().some((id) => $(id).value === "" || !$(id).validity.valid);
+    const pocketError = invalidPocket ? "Mechanism mount: enter dimensions within the displayed ranges and steps." : state.mechanismRecess && lastGeometryError?.key === key && /^Rear (pocket|box):/.test(lastGeometryError.message) ? lastGeometryError.message : null;
     $("recessError").hidden = !pocketError;
     $("recessError").textContent = pocketError || "";
-    $("backingForRecess").hidden = !state.mechanismRecess || state.design !== "custom" || state.svgBacking && state.svgBackingThickness >= state.recessDepth + RECESS_SKIN;
+    $("backingForRecess").hidden = !state.mechanismRecess || state.design !== "custom" || state.svgBacking && (raisedMechanismBox(state) || state.svgBackingThickness >= state.recessDepth + RECESS_SKIN);
+    $("backingForRecess").textContent = raisedMechanismBox(state) ? "Use a round backing under the box" : "Use a thick round backing for the pocket";
     if (pocketError) {
       $("printCheckStatus").textContent = pocketError;
       $("printCheckStatus").dataset.tone = "warning";
@@ -7217,8 +7289,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   };
   var holeFit = new HoleFitDialog({ workerURL, getHole: () => state.hole, isBusy: () => importPending || restorePending || deletingArtwork || !!exportController || $("hole").value === "" || !$("hole").validity.valid, getHeight: () => {
     const stats = meshStore.peek(geometryKey())?.stats;
-    const extra = originalArtwork() ? state.svgRelief + (state.markers ? 0.8 : 0) : Math.max(state.texture === "smooth" ? 0 : 0.4, state.markers ? 0.8 : 0);
-    return { value: stats?.dimensions[2] ?? artworkSurfaceHeight(state) + extra, measured: !!stats };
+    const extra = flatMechanismBox(state) ? 0 : originalArtwork() ? state.svgRelief + (state.markers ? 0.8 : 0) : Math.max(state.texture === "smooth" ? 0 : 0.4, state.markers ? 0.8 : 0);
+    return { value: stats?.dimensions[2] ?? artworkSurfaceHeight(state) + extra + (raisedMechanismBox(state) ? state.recessDepth : 0), measured: !!stats };
   }, onSelect: (hole) => {
     state.hole = hole;
     delete $("hole").dataset.editing;
