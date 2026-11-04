@@ -83,6 +83,7 @@ async function run(window){
 
   await set('diameterNumber',257);await set('bedWidth',180);await set('bedDepth',180);await click('checkModel');
   await wait(()=>!document.getElementById('fitToBed').hidden,'oversized build plate warning');assert.equal(await evaluate(()=>document.getElementById('bedStatus').dataset.tone),'warning');
+  assert.ok(await evaluate(()=>!document.getElementById('bedSettings').open&&document.getElementById('fitToBed').getClientRects().length>0),'the resize action is visible even with build-plate details collapsed');
   await click('fitToBed');assert.ok(await diameter()<=176);await click('checkModel');
   await wait(()=>document.getElementById('bedStatus').dataset.tone==='success','resized model fits');
   const fitted=analyzeSTL((await download()).buffer);assert.ok(fitted.dimensions[0]<180&&fitted.dimensions[1]<180);
@@ -134,5 +135,59 @@ async function run(window){
   assert.equal(await evaluate(()=>document.getElementById('printCheckStatus').dataset.checked),'true');assert.ok(analyzeSTL((await download()).buffer).triangles>100);
   await click('designPreview');assert.equal(await evaluate(()=>document.getElementById('clockObject').hidden),false);
   console.log('PASS unavailable 3D graphics preserve print checks, SVG design, and downloads');
+
+  // Exercise the quick print choices as a real SVG-to-file workflow, including
+  // the saved printer context and the instructions shown for the actual file.
+  await upload('svgUpload',readFileSync(join(__dirname,'fixtures/bambu-colors.svg'),'utf8'),'bambu-colors.svg');
+  await set('diameterNumber',100);await set('svgRelief',0);await set('markers',false);
+  const {unzipSync,strFromU8}=await import('fflate');
+  const buildsBefore=await evaluate(()=>window.__studioBuilds);
+  await click('bambuColorPrint');
+  assert.equal(await evaluate(()=>document.getElementById('bedWidth').value),'256');assert.equal(await evaluate(()=>document.getElementById('bedDepth').value),'256');
+  assert.equal(await evaluate(()=>document.getElementById('printerPreset').value),'a1');
+  assert.equal(await evaluate(()=>document.getElementById('exportAdjustments').open),false,'the quick choice works without opening technical options');
+  const colorPrint=await download(),colorZip=unzipSync(colorPrint.buffer);
+  assert.match(colorPrint.name,/-bambu-a1\.3mf$/);
+  assert.equal(JSON.parse(strFromU8(colorZip['Metadata/project_settings.config'])).printer_settings_id,'Bambu Lab A1 0.4 nozzle');
+  assert.match(await evaluate(()=>document.getElementById('downloadSteps').textContent),/Open as project/);
+  assert.match(await evaluate(()=>document.getElementById('downloadSteps').textContent),/AMS spool/);
+  const repeat=await download('downloadAgain');assert.deepEqual(repeat.buffer,colorPrint.buffer);
+  await click('singleColorPrint');assert.equal(await evaluate(()=>document.getElementById('downloadGuide').hidden),true,'instructions for an earlier file disappear when the print type changes');
+  const singlePrint=await download();assert.match(singlePrint.name,/\.stl$/);assert.ok(analyzeSTL(singlePrint.buffer).triangles>100);
+  assert.doesNotMatch(await evaluate(()=>document.getElementById('downloadSteps').textContent),/AMS|Open as project/);
+  assert.match(await evaluate(()=>document.getElementById('downloadNote').textContent),/STL contains the shape/);
+  assert.equal(await evaluate(()=>window.__studioBuilds),buildsBefore+1,'quick choices and repeat downloads reuse one geometry build');
+  await evaluate(()=>document.querySelector('#exportAdjustments>summary').click());await set('exportFormat','3mf','change');await set('threeMFTarget','standard','change');
+  const standardPrint=await download();assert.ok(unzipSync(standardPrint.buffer)['3D/Textures/artwork.png']);
+  assert.equal(await evaluate(()=>document.getElementById('bambuColorPrint').getAttribute('aria-pressed')),'false');
+  assert.match(await evaluate(()=>document.getElementById('downloadNote').textContent),/color texture/);
+  console.log('PASS quick print choices produce the intended files, set the A1 plate, reuse geometry, and give file-specific next steps');
+
+  await click('bambuColorPrint');
+  await new Promise(resolve=>{window.webContents.once('did-finish-load',resolve);window.webContents.reload();});await hooks();
+  await wait(()=>!!document.getElementById('originalArtwork'),'SVG restoration with quick print settings');
+  assert.equal(await evaluate(()=>document.getElementById('bambuColorPrint').getAttribute('aria-pressed')),'true');
+  assert.equal(await evaluate(()=>document.getElementById('printerPreset').value),'a1');
+  assert.equal(await evaluate(()=>document.getElementById('bedWidth').value),'256');
+  await set('printerPreset','custom','change');await set('bedWidth',180);await set('diameterNumber',188);
+  assert.equal(await evaluate(()=>document.getElementById('printerPreset').value),'custom');
+  assert.equal(await evaluate(()=>document.getElementById('bedWidth').value),'180','further edits preserve a custom plate');
+  await set('printerPreset','a1','change');assert.equal(await evaluate(()=>document.getElementById('bedWidth').value),'256');
+  console.log('PASS the A1 quick setup survives reopening and respects later custom build-plate edits');
+
+  window.webContents.debugger.attach('1.3');
+  for(const width of [320,390]){
+    await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});
+    assert.ok(await evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${width}px workspace has no horizontal overflow`);
+    for(const target of ['preview','shapeSection','printSection']){
+      const point=await evaluate(target=>{const link=document.querySelector(`.mobile-shortcuts a[href="#${target}"]`),r=link.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),height:r.height};},target);
+      assert.ok(point.height>=44,'touch shortcuts have full-size targets');
+      window.webContents.sendInputEvent({type:'mouseDown',x:point.x,y:point.y,button:'left',clickCount:1});window.webContents.sendInputEvent({type:'mouseUp',x:point.x,y:point.y,button:'left',clickCount:1});
+      await wait(()=>location.hash&&document.getElementById(location.hash.slice(1))?.getBoundingClientRect().top<innerHeight-90,'shortcut navigation');
+      assert.equal(await evaluate(()=>location.hash),'#'+target);
+    }
+  }
+  assert.deepEqual(await evaluate(()=>window.__studioErrors),[]);
+  console.log('PASS mobile shortcuts navigate between editing, preview and export with accessible touch targets at 320 and 390 pixels');
 }
 require('../desktop/main.cjs');

@@ -34,8 +34,8 @@ const meshViewURL=new URL('./mesh-view.js',document.currentScript?.src||location
 const history=new DesignHistory(),meshStore=new MeshStore(2);
 let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null,applyingHistory=false;
 let previewMode='design',meshView=null,loadedMeshKey=null,meshPreviewKey=null,meshPreviewController=null,meshPreviewTimer=null,checkController=null,checkKey=null;
-let bed={width:220,depth:220};
-try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500))bed=saved;}catch{}
+let bed={width:220,depth:220},bedPreset='custom';
+try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500)){bed={width:saved.width,depth:saved.depth};if(saved.preset==='a1'&&saved.width===256&&saved.depth===256)bedPreset='a1';}}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
 function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null]);}
 function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[colors[settings.color][1],settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor]:null]:null]);}
@@ -186,6 +186,11 @@ for(const id of ['numberSize','numberPosition','svgRelief'])$(id).addEventListen
 function updateExportFormatUI(){
   const format=state.exportFormat.toUpperCase();$('exportFormat').value=state.exportFormat;
   const bambu=state.exportFormat==='3mf'&&state.threeMFTarget==='bambu-a1';
+  const single=state.exportFormat==='stl';
+  for(const [id,selected]of [['singleColorPrint',single],['bambuColorPrint',bambu]]){$(id).classList.toggle('selected',selected);$(id).setAttribute('aria-pressed',String(selected));}
+  $('printModeLabel').textContent=single?'One-color print':bambu?'Bambu A1 · color':'Standard 3MF';
+  $('printModeHint').textContent=single?'A simple print in one filament. Your SVG details can still stand out in relief.':bambu?`A1 / 0.4 mm · up to ${state.filamentCount} filaments. SVG colors become printable color regions; gradients become solid colors.`:'Original SVG colors are stored as a texture. Check that your software supports 3MF textures; this option does not assign filaments.';
+  $('exportOptionsSummary').textContent=single?'STL · one color':bambu?`A1 / 0.4 mm · up to ${state.filamentCount} colors`:'Standard 3MF · color texture';
   $('exportType').textContent=bambu?'3MF · Bambu A1':`${format} file`;
   $('exportFormatHint').textContent=originalArtwork()?(state.exportFormat==='3mf'?'3MF keeps the SVG relief and original artwork as a color texture. Texture color support depends on your slicer.':'STL keeps the SVG details as relief. STL stores geometry; use 3MF to keep the artwork colors too.'):(state.exportFormat==='3mf'?'3MF includes the mesh, millimeter units, and selected face color.':'STL exports the printable mesh. Colors are a filament preview.');
   $('threeMFOptions').hidden=state.exportFormat!=='3mf';$('threeMFTarget').value=state.threeMFTarget;$('filamentCount').value=state.filamentCount;$('bambuBackColor').value=state.bambuBackColor;$('bambuOptions').hidden=!bambu;
@@ -195,9 +200,16 @@ function updateExportFormatUI(){
 }
 function showFilamentPalette(palette){
   $('filamentPalette').replaceChildren();
+  $('paletteSummary').hidden=!palette?.length;
   if(!palette?.length)return;
   palette.forEach((color,i)=>{const chip=document.createElement('span'),dot=document.createElement('i');dot.style.backgroundColor=color;chip.append(dot,document.createTextNode(`${i+1} · ${color}`));$('filamentPalette').append(chip);});
 }
+$('singleColorPrint').onclick=()=>{state.exportFormat='stl';render();};
+$('bambuColorPrint').onclick=()=>{
+  state.exportFormat='3mf';state.threeMFTarget='bambu-a1';
+  setBuildPlate(256,256,'a1');render();
+};
+$('downloadAgain').onclick=()=>$('export').click();
 for(const id of ['thickness','hole'])$(id).addEventListener('blur',()=>{if(validateDimensions()){delete $(id).dataset.editing;$(id).value=state[id];}});
 function tab(upload){$('uploadPanel').hidden=!upload;$('presetPanel').hidden=upload;for(const [id,active]of[['uploadTab',upload],['presetsTab',!upload]]){$(id).classList.toggle('selected',active);$(id).setAttribute('aria-selected',active);$(id).tabIndex=active?0:-1;}}
 document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{state.diameter=Number(b.dataset.size);render();});
@@ -396,6 +408,18 @@ function downloadClock(blob,settings,key){
   link.href=url;link.download=`clock-factory-${settings.design}-${settings.diameter}mm${settings.exportFormat==='3mf'&&settings.threeMFTarget==='bambu-a1'?'-bambu-a1':''}.${settings.exportFormat}`;
   document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
   lastDownloadKey=key;$('downloadGuide').hidden=fileKey()!==key;
+  const bambu=settings.exportFormat==='3mf'&&settings.threeMFTarget==='bambu-a1';
+  const steps=bambu?[
+    'Open the .3mf in Bambu Studio and choose “Open as project” to load its colors.',
+    'Choose your actual filament presets and match each numbered color to an AMS spool.',
+    'Check the flat side is on the plate, review flushing volumes, then slice and print.'
+  ]:[
+    `Open the .${settings.exportFormat} file in your printer’s slicer.`,
+    'Place the flat side on the print bed and check the dimensions.',
+    'Slice and print, then fit your clock movement and hands.'
+  ];
+  $('downloadSteps').replaceChildren(...steps.map(text=>{const item=document.createElement('li');item.textContent=text;return item;}));
+  $('downloadNote').textContent=bambu?'A1 · 0.4 mm nozzle. Up to 4 colors with one AMS Lite. Reopen your .clock project in Clock Factory to edit the design.':settings.exportFormat==='stl'?'STL contains the shape and raised details. For colored SVG artwork on your A1, choose Bambu A1 · colors above.':'Standard 3MF contains a color texture. For AMS filament assignments, choose Bambu A1 · colors above.';
   toast(fileKey()===key?'Your print file is ready. Next steps are below the download button.':`Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
 }
 function paintHourDetails(context,settings){
@@ -458,18 +482,29 @@ function updatePrintSummary(){
   const fit=stats?bedFit(stats.dimensions,bed.width,bed.depth):null;
   $('bedLabel').textContent=`${bed.width} × ${bed.depth} mm${valid&&fit?(fit.fits?' · Fits':' · Too small'):''}`;
   $('bedLabel').dataset.tone=valid&&fit?(fit.fits?'success':'warning'):'neutral';
+  $('printerPreset').value=bedPreset;
   if(stats&&valid&&!fit.fits){$('printCheckStatus').textContent=`${stats.components>1?stats.components+' separate pieces.':'Closed mesh checked.'} Too large for your ${bed.width} × ${bed.depth} mm build plate.`;$('printCheckStatus').dataset.tone='warning';}
   $('bedStatus').textContent=!valid?'Enter build plate dimensions from 80 to 500 mm.':!fit?'Check the model to verify its fit on this build plate.':fit.fits?(fit.rotated?'Fits after a quarter turn on the build plate.':'Fits on your build plate.'): 'This model is larger than your build plate. Reduce its size or choose a larger printer.';
   $('bedStatus').dataset.tone=valid&&fit?(fit.fits?'success':'warning'):'neutral';
   $('fitToBed').hidden=!valid||!fit||fit.fits;
   if(meshView)meshView.setBed(bed.width,bed.depth,fit?.fits!==false,$('meshBed').checked);
 }
+function saveBuildPlate(){try{localStorage.setItem('clock-factory-bed',JSON.stringify({...bed,preset:bedPreset}));}catch{}}
+function setBuildPlate(width,depth,preset='custom'){
+  bed={width,depth};bedPreset=preset;$('bedWidth').value=width;$('bedDepth').value=depth;saveBuildPlate();
+}
+$('printerPreset').onchange=()=>{
+  if($('printerPreset').value==='a1')setBuildPlate(256,256,'a1');
+  else{bedPreset='custom';saveBuildPlate();}
+  updatePrintSummary();
+};
 for(const [id,key]of [['bedWidth','width'],['bedDepth','depth']]){
   $(id).value=bed[key];
   $(id).addEventListener('input',()=>{
+    bedPreset='custom';
     if([$('bedWidth'),$('bedDepth')].every(input=>input.value!==''&&input.validity.valid)){
       bed={width:Number($('bedWidth').value),depth:Number($('bedDepth').value)};
-      try{localStorage.setItem('clock-factory-bed',JSON.stringify(bed));}catch{}
+      saveBuildPlate();
     }
     updatePrintSummary();
   });

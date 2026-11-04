@@ -20,6 +20,10 @@ Undo/redo stores up to 60 design states, including imported artwork and reset op
 
 Set the diameter from 100 to 300 mm in 1 mm steps using the slider or exact-size field. **Show hands** controls the illustrative hands in Design view; they never appear in print files. The welcome card can be dismissed, tabs support arrow-key navigation, and the workspace adapts to mobile screens.
 
+The print area starts with two choices: **One-color print** prepares an STL, and **Bambu A1 · colors** prepares a native color 3MF and selects the A1's 256 × 256 mm build plate. **More export options** keeps the format, standard textured 3MF alternative, color limit, and back color available without crowding the main workflow. The A1 build-plate preset can also be chosen independently of the file format; custom dimensions stay editable and the selected plate is remembered on this device. An oversized model's **Make it fit** action remains visible while the plate details are collapsed.
+
+After exporting, the next steps match the file: Bambu users are told to open it as a project and map filaments, while STL and standard textured 3MF have their own instructions. **Download again** reuses the prepared file. On small screens, a fixed shortcut bar jumps to **Edit design**, **See preview**, or **Download** without changing the design. The help dialog gives a three-step introduction with optional movement and printing details.
+
 ## Real 3D preview and print checks
 
 **Design** shows the artwork with optional illustrative hands. **Print mesh** displays the actual validated STL geometry, including shaft opening, thickness, SVG relief, and hour details. Drag to orbit, scroll/pinch or use the buttons to zoom, and use Front/Angle to inspect the surface. The optional edges, build-plate, and SVG-color displays do not alter the exported model. SVG colors use the same embedded texture placement as 3MF. Three.js is bundled locally and loaded only when needed; rendering runs on changes rather than in a continuous animation loop. If 3D graphics are unavailable, design editing, model checks, and downloads remain usable.
@@ -32,8 +36,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.5.1-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.5.1-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.6.0-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.6.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
@@ -83,7 +87,7 @@ Run `npm run test:numerals-3mf` for desktop checks of number styles, size, posit
 
 Run `npm run test:svg-details` for original SVG color, gradient, pattern, fine-line, text, filter, and clipping checks, real detailed STL/3MF downloads, maximum relief with added numerals, texture orientation, worker fallback, and saved detail controls.
 
-Run `npm run test:studio` for project round-trips and native downloads, undo/redo and native menus, exact-size validation, genuine rendered 3D pixels, shared preview/export builds, build-plate fit, disconnected-part detection, cancellation during texture loading, mobile layout, and graphics fallback. The test uses software WebGL for deterministic graphics; the shipped application uses the device's normal graphics settings. On display-free Linux, run `npx electron --no-sandbox --ozone-platform=headless tests/studio.electron.cjs` after building, without `--disable-gpu`.
+Run `npm run test:studio` for project round-trips and native downloads, undo/redo and native menus, exact-size validation, genuine rendered 3D pixels, shared preview/export builds, build-plate fit, disconnected-part detection, cancellation during texture loading, mobile layout, and graphics fallback. It also checks real downloads from the quick print choices, file-specific instructions, repeat downloads, saved A1/custom plate settings, and actual shortcut navigation at 320 and 390 pixels. The test uses software WebGL for deterministic graphics; the shipped application uses the device's normal graphics settings. On display-free Linux, run `npx electron --no-sandbox --ozone-platform=headless tests/studio.electron.cjs` after building, without `--disable-gpu`.
 
 Run `npm run test:bambu` for real desktop A1 exports, all four source colors, native sub-facet paint, exact STL geometry, color limits, back-color choices, and worker fallback. On display-free Linux use the same headless flags as the other SVG suites.
 

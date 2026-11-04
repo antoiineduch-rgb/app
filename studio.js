@@ -5118,9 +5118,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   var checkController = null;
   var checkKey = null;
   var bed = { width: 220, depth: 220 };
+  var bedPreset = "custom";
   try {
     const saved = JSON.parse(localStorage.getItem("clock-factory-bed") || "null");
-    if (saved && [saved.width, saved.depth].every((v) => Number.isInteger(v) && v >= 80 && v <= 500)) bed = saved;
+    if (saved && [saved.width, saved.depth].every((v) => Number.isInteger(v) && v >= 80 && v <= 500)) {
+      bed = { width: saved.width, depth: saved.depth };
+      if (saved.preset === "a1" && saved.width === 256 && saved.depth === 256) bedPreset = "a1";
+    }
   } catch {
   }
   function originalArtwork(settings = state) {
@@ -5438,6 +5442,14 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const format = state.exportFormat.toUpperCase();
     $("exportFormat").value = state.exportFormat;
     const bambu = state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1";
+    const single = state.exportFormat === "stl";
+    for (const [id, selected] of [["singleColorPrint", single], ["bambuColorPrint", bambu]]) {
+      $(id).classList.toggle("selected", selected);
+      $(id).setAttribute("aria-pressed", String(selected));
+    }
+    $("printModeLabel").textContent = single ? "One-color print" : bambu ? "Bambu A1 · color" : "Standard 3MF";
+    $("printModeHint").textContent = single ? "A simple print in one filament. Your SVG details can still stand out in relief." : bambu ? `A1 / 0.4 mm · up to ${state.filamentCount} filaments. SVG colors become printable color regions; gradients become solid colors.` : "Original SVG colors are stored as a texture. Check that your software supports 3MF textures; this option does not assign filaments.";
+    $("exportOptionsSummary").textContent = single ? "STL · one color" : bambu ? `A1 / 0.4 mm · up to ${state.filamentCount} colors` : "Standard 3MF · color texture";
     $("exportType").textContent = bambu ? "3MF · Bambu A1" : `${format} file`;
     $("exportFormatHint").textContent = originalArtwork() ? state.exportFormat === "3mf" ? "3MF keeps the SVG relief and original artwork as a color texture. Texture color support depends on your slicer." : "STL keeps the SVG details as relief. STL stores geometry; use 3MF to keep the artwork colors too." : state.exportFormat === "3mf" ? "3MF includes the mesh, millimeter units, and selected face color." : "STL exports the printable mesh. Colors are a filament preview.";
     $("threeMFOptions").hidden = state.exportFormat !== "3mf";
@@ -5451,6 +5463,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   }
   function showFilamentPalette(palette) {
     $("filamentPalette").replaceChildren();
+    $("paletteSummary").hidden = !palette?.length;
     if (!palette?.length) return;
     palette.forEach((color, i2) => {
       const chip = document.createElement("span"), dot = document.createElement("i");
@@ -5459,6 +5472,17 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       $("filamentPalette").append(chip);
     });
   }
+  $("singleColorPrint").onclick = () => {
+    state.exportFormat = "stl";
+    render();
+  };
+  $("bambuColorPrint").onclick = () => {
+    state.exportFormat = "3mf";
+    state.threeMFTarget = "bambu-a1";
+    setBuildPlate(256, 256, "a1");
+    render();
+  };
+  $("downloadAgain").onclick = () => $("export").click();
   for (const id of ["thickness", "hole"]) $(id).addEventListener("blur", () => {
     if (validateDimensions()) {
       delete $(id).dataset.editing;
@@ -5923,6 +5947,22 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     setTimeout(() => URL.revokeObjectURL(url), 1e4);
     lastDownloadKey = key;
     $("downloadGuide").hidden = fileKey() !== key;
+    const bambu = settings.exportFormat === "3mf" && settings.threeMFTarget === "bambu-a1";
+    const steps = bambu ? [
+      "Open the .3mf in Bambu Studio and choose “Open as project” to load its colors.",
+      "Choose your actual filament presets and match each numbered color to an AMS spool.",
+      "Check the flat side is on the plate, review flushing volumes, then slice and print."
+    ] : [
+      `Open the .${settings.exportFormat} file in your printer’s slicer.`,
+      "Place the flat side on the print bed and check the dimensions.",
+      "Slice and print, then fit your clock movement and hands."
+    ];
+    $("downloadSteps").replaceChildren(...steps.map((text) => {
+      const item = document.createElement("li");
+      item.textContent = text;
+      return item;
+    }));
+    $("downloadNote").textContent = bambu ? "A1 · 0.4 mm nozzle. Up to 4 colors with one AMS Lite. Reopen your .clock project in Clock Factory to edit the design." : settings.exportFormat === "stl" ? "STL contains the shape and raised details. For colored SVG artwork on your A1, choose Bambu A1 · colors above." : "Standard 3MF contains a color texture. For AMS filament assignments, choose Bambu A1 · colors above.";
     toast(fileKey() === key ? "Your print file is ready. Next steps are below the download button." : `Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
   }
   function paintHourDetails(context, settings) {
@@ -6017,6 +6057,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const fit = stats ? bedFit(stats.dimensions, bed.width, bed.depth) : null;
     $("bedLabel").textContent = `${bed.width} × ${bed.depth} mm${valid && fit ? fit.fits ? " · Fits" : " · Too small" : ""}`;
     $("bedLabel").dataset.tone = valid && fit ? fit.fits ? "success" : "warning" : "neutral";
+    $("printerPreset").value = bedPreset;
     if (stats && valid && !fit.fits) {
       $("printCheckStatus").textContent = `${stats.components > 1 ? stats.components + " separate pieces." : "Closed mesh checked."} Too large for your ${bed.width} × ${bed.depth} mm build plate.`;
       $("printCheckStatus").dataset.tone = "warning";
@@ -6026,15 +6067,34 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("fitToBed").hidden = !valid || !fit || fit.fits;
     if (meshView) meshView.setBed(bed.width, bed.depth, fit?.fits !== false, $("meshBed").checked);
   }
+  function saveBuildPlate() {
+    try {
+      localStorage.setItem("clock-factory-bed", JSON.stringify({ ...bed, preset: bedPreset }));
+    } catch {
+    }
+  }
+  function setBuildPlate(width, depth, preset = "custom") {
+    bed = { width, depth };
+    bedPreset = preset;
+    $("bedWidth").value = width;
+    $("bedDepth").value = depth;
+    saveBuildPlate();
+  }
+  $("printerPreset").onchange = () => {
+    if ($("printerPreset").value === "a1") setBuildPlate(256, 256, "a1");
+    else {
+      bedPreset = "custom";
+      saveBuildPlate();
+    }
+    updatePrintSummary();
+  };
   for (const [id, key] of [["bedWidth", "width"], ["bedDepth", "depth"]]) {
     $(id).value = bed[key];
     $(id).addEventListener("input", () => {
+      bedPreset = "custom";
       if ([$("bedWidth"), $("bedDepth")].every((input) => input.value !== "" && input.validity.valid)) {
         bed = { width: Number($("bedWidth").value), depth: Number($("bedDepth").value) };
-        try {
-          localStorage.setItem("clock-factory-bed", JSON.stringify(bed));
-        } catch {
-        }
+        saveBuildPlate();
       }
       updatePrintSummary();
     });
