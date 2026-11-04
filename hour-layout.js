@@ -62,6 +62,6 @@ export function fittedHourPolygons(settings,layout,padding=0){
     const original=originals.find(label=>label.hour===placed.hour);return original.polygons.map(p=>p.map(r=>r.map(([x,y])=>[snap(placed.x+(x-original.x)*placed.scale),snap(placed.y+(y-original.y)*placed.scale)])));
   }));
 }
-export function hourLayoutMarkup(layout,project){
-  return layout.labels.map(label=>`<path data-hour="${label.hour}" aria-label="${label.text}" d="${label.polygons.map(p=>p.map(r=>r.map(([x,y],i)=>{const point=project(x,y);return `${i?'L':'M'}${point[0]} ${point[1]}`;}).join('')+'Z').join('')).join('')}" fill-rule="evenodd"/>`).join('');
+export function hourLayoutMarkup(layout,project,colors=null){
+  return layout.labels.map(label=>`<path data-hour="${label.hour}" aria-label="${label.text}"${colors?` fill="${colors[label.hour]}"`:''} d="${label.polygons.map(p=>p.map(r=>r.map(([x,y],i)=>{const point=project(x,y);return `${i?'L':'M'}${point[0]} ${point[1]}`;}).join('')+'Z').join('')).join('')}" fill-rule="evenodd"/>`).join('');
 }

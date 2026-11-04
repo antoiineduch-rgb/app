@@ -1,4 +1,4 @@
-import { Scene,Color,PerspectiveCamera,WebGLRenderer,BufferAttribute,BufferGeometry,Mesh,MeshStandardMaterial,HemisphereLight,DirectionalLight,LineSegments,LineBasicMaterial,PlaneGeometry,Texture,SRGBColorSpace,DoubleSide,Vector3,ACESFilmicToneMapping,PCFSoftShadowMap } from 'three';
+import { Scene,Color,PerspectiveCamera,WebGLRenderer,BufferAttribute,BufferGeometry,Mesh,MeshStandardMaterial,HemisphereLight,DirectionalLight,LineSegments,LineBasicMaterial,PlaneGeometry,Texture,DataTexture,RGBAFormat,SRGBColorSpace,DoubleSide,Vector3,ACESFilmicToneMapping,PCFSoftShadowMap } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {artworkPixel,paintedTriangle,flatMechanismBox} from './artwork-surface.js';
 
@@ -6,7 +6,7 @@ import {artworkPixel,paintedTriangle,flatMechanismBox} from './artwork-surface.j
 // resize, or model changes; an idle studio does not run an animation loop.
 export class PrintView{
   constructor(container,{onError=()=>{}}={}){
-    this.container=container;this.sequence=0;this.visible=false;this.colored=true;this.wireframe=false;this.plateVisible=true;this.frame=null;this.appearanceKey=null;
+    this.container=container;this.sequence=0;this.visible=false;this.colored=true;this.wireframe=false;this.plateVisible=true;this.frame=null;this.appearanceKey=null;this.filamentKey=null;
     this.scene=new Scene();this.scene.background=new Color('#eeeee6');
     this.camera=new PerspectiveCamera(36,1,.1,5000);this.camera.up.set(0,0,1);this.camera.position.set(0,-250,350);
     this.renderer=new WebGLRenderer({antialias:true,alpha:false,powerPreference:'low-power'});
@@ -36,15 +36,15 @@ export class PrintView{
     this.faceDown=flatMechanismBox(settings);
     const sequence=++this.sequence,view=new DataView(result.stlBuffer),count=view.getUint32(80,true);
     const positions=new Float32Array(count*9),normals=new Float32Array(count*9),uv=new Float32Array(count*6),groups=[];
-    const texture=result.artwork?.texture;
+    const texture=result.artwork?.texture,surface=texture||result.artwork?.surface;
     let start=0,previous=-1;
     for(let i=0;i<count;i++){
-      let painted=!!texture;
+      let painted=!!surface;
       for(let j=0;j<3;j++){
         const at=i*9+j*3,x=view.getFloat32(96+i*50+j*12,true),y=view.getFloat32(100+i*50+j*12,true),z=view.getFloat32(104+i*50+j*12,true);
         positions.set([x,y,z],at);normals.set([0,1,2].map(k=>view.getFloat32(84+i*50+k*4,true)),at);
-        if(!paintedTriangle([[x,y,z]],texture))painted=false;
-        if(texture){const pixel=artworkPixel([x,y,z],texture.frame);uv.set([pixel[0]/texture.frame.n,1-pixel[1]/texture.frame.n],i*6+j*2);}
+        if(painted&&!paintedTriangle([[x,y,z]],surface))painted=false;
+        if(surface){const pixel=artworkPixel([x,y,z],surface.frame);uv.set([pixel[0]/surface.frame.n,1-pixel[1]/surface.frame.n],i*6+j*2);}
       }
       const material=painted?1:0;
       if(material!==previous){if(previous>=0)groups.push([start,(i*3)-start,previous]);start=i*3;previous=material;}
@@ -68,11 +68,20 @@ export class PrintView{
     this.canvas.dataset.triangles=String(count);this.canvas.dataset.vertices=String(result.stats.vertices);this.canvas.dataset.span=String(this.span);
   }
   setAppearance(color,colored=this.colored,wireframe=this.wireframe){
-    this.colored=colored;this.wireframe=wireframe;if(!this.model)return;
-    const key=JSON.stringify([color,colored,wireframe]);if(key===this.appearanceKey)return;this.appearanceKey=key;
-    const [base,painted]=this.model.material;base.color.set(color);painted.color.set(this.texture&&colored?'#ffffff':color);painted.map=colored?this.texture:null;
+    this.color=color;this.colored=colored;this.wireframe=wireframe;if(!this.model)return;
+    const key=JSON.stringify([color,colored,wireframe,this.filamentKey]);if(key===this.appearanceKey)return;this.appearanceKey=key;
+    const texture=this.filamentTexture||this.texture,baseColor=colored&&this.filamentTexture?this.filamentBase:color;
+    const [base,painted]=this.model.material;base.color.set(baseColor);painted.color.set(texture&&colored?'#ffffff':baseColor);painted.map=colored?texture:null;
     for(const material of [base,painted]){material.wireframe=wireframe;material.needsUpdate=true;}
+    this.canvas.dataset.colorSource=colored?(this.filamentTexture?'filaments':'artwork'):'solid';
     this.render();
+  }
+  setFilaments(proof){
+    const key=proof?.key??null;if(key===this.filamentKey)return;
+    this.filamentTexture?.dispose();this.filamentTexture=null;this.filamentKey=key;
+    if(proof){this.filamentTexture=new DataTexture(proof.data,proof.width,proof.width,RGBAFormat);this.filamentTexture.colorSpace=SRGBColorSpace;this.filamentTexture.needsUpdate=true;this.filamentBase=proof.base;}
+    this.canvas.dataset.filaments=proof?.palette.join(',')||'';this.appearanceKey=null;
+    this.setAppearance(this.color,this.colored,this.wireframe);
   }
   setBed(width,depth,fits=true,visible=this.plateVisible){
     this.plateVisible=visible;
@@ -96,5 +105,5 @@ export class PrintView{
     this.controls.update();this.render();
   }
   zoom(factor){const offset=this.camera.position.clone().sub(this.controls.target);offset.setLength(Math.max(this.controls.minDistance,Math.min(this.controls.maxDistance,offset.length()*factor)));this.camera.position.copy(this.controls.target).add(offset);this.controls.update();this.render();}
-  dispose(){this.sequence++;if(this.frame!==null)cancelAnimationFrame(this.frame);this.observer.disconnect();this.controls.dispose();if(this.model){this.model.geometry.dispose();for(const material of this.model.material)material.dispose();}for(const object of this.bed||[]){object.geometry.dispose();object.material.dispose();}this.texture?.dispose();this.keyLight.shadow.map?.dispose();this.renderer.dispose();this.canvas.remove();}
+  dispose(){this.sequence++;if(this.frame!==null)cancelAnimationFrame(this.frame);this.observer.disconnect();this.controls.dispose();if(this.model){this.model.geometry.dispose();for(const material of this.model.material)material.dispose();}for(const object of this.bed||[]){object.geometry.dispose();object.material.dispose();}this.texture?.dispose();this.filamentTexture?.dispose();this.keyLight.shadow.map?.dispose();this.renderer.dispose();this.canvas.remove();}
 }

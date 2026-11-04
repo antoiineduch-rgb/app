@@ -1,6 +1,7 @@
 import {filamentPaint,dominantArtworkColor} from './bambu-paint.js';
 import {filamentColors} from './filament-colors.js';
 import {usesSVGBacking} from './svg-details.js';
+import {filamentTexture} from './filament-texture.js';
 
 function analyze(painting,settings,workerURL,signal){
   return new Promise((resolve,reject)=>{
@@ -33,8 +34,8 @@ function analyze(painting,settings,workerURL,signal){
 // This preview uses the export's raster and palette algorithm, without building
 // a mesh. Recoloring only changes filament assignments, so it reuses analysis.
 export class FilamentPreview{
-  constructor({workerURL,prepareRaster,onColorChange,onReset}){
-    this.workerURL=workerURL;this.prepareRaster=prepareRaster;this.onColorChange=onColorChange;
+  constructor({workerURL,prepareRaster,onColorChange,onReset,onReady=()=>{}}){
+    this.workerURL=workerURL;this.prepareRaster=prepareRaster;this.onColorChange=onColorChange;this.onReady=onReady;
     this.root=document.getElementById('filamentPreview');this.body=document.getElementById('filamentProofBody');
     this.status=document.getElementById('filamentProofStatus');this.canvas=document.getElementById('filamentProofCanvas');
     this.editors=document.getElementById('filamentEditors');this.reset=document.getElementById('resetFilamentColors');this.retry=document.getElementById('filamentProofRetry');
@@ -45,7 +46,13 @@ export class FilamentPreview{
     this.reset.onclick=onReset;this.retry.onclick=()=>{this.cached=null;this.update(this.current);};
   }
   cancel(){clearTimeout(this.timer);this.controller?.abort();this.controller=null;this.jobKey=null;}
-  dispose(){this.cancel();this.cached=null;}
+  dispose(){this.cancel();this.cached=null;this.textureCache=null;}
+  meshColors(){
+    if(this.mode!=='print'||!this.current?.enabled||this.current.busy||this.cached?.key!==this.current.key)return null;
+    const {paint}=this.cached,mapped=filamentColors(paint.palette,this.current.overrides),key=JSON.stringify([this.cached.key,mapped.colors]);
+    if(this.textureCache?.key!==key)this.textureCache={key,data:filamentTexture(paint.map,paint.width,mapped.colors),width:paint.width,palette:mapped.palette,base:mapped.colors[0]};
+    return this.textureCache;
+  }
   update(current){
     this.current=current;this.root.hidden=!current.enabled;
     if(!current.enabled){this.cancel();return;}
@@ -117,5 +124,6 @@ export class FilamentPreview{
       else if(rgba[source+3]>=128){image.data.set(palette[mapped.indices[paint.map[pixel]]],target);image.data[target+3]=255;}
     }
     context.putImageData(image,0,0);
+    this.onReady();
   }
 }

@@ -64,6 +64,9 @@ jobs:
       - name: Test flat-bed printing and raised movement boxes
         run: npm run test:mechanism-box
 
+      - name: Test guided setup, print review, and 3D filament colors
+        run: npm run test:guided-studio
+
       - name: Build Windows installer
         run: npm run dist:win
 

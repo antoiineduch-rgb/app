@@ -68,3 +68,8 @@ test('raised mechanism boxes round-trip and existing recessed projects retain th
   assert.equal(normalizeSettings({mechanismRecess:false}).mechanismMount,'box');
   for(const patch of [{mechanismMount:'solid'},{mechanismWall:.4},{mechanismFlatFront:'yes'}])assert.throws(()=>parseProject(JSON.stringify({...old,settings:{...old.settings,...patch}})),/project/);
 });
+test('hour contrast travels with projects while earlier designs retain their light hour color',()=>{
+  const settings={...DEFAULT_SETTINGS,hourColor:'auto'};assert.equal(parseProject(serializeProject(settings)).settings.hourColor,'auto');
+  const legacy=JSON.parse(serializeProject(settings));delete legacy.settings.hourColor;assert.equal(parseProject(JSON.stringify(legacy)).settings.hourColor,'light');
+  legacy.settings.hourColor='rainbow';assert.throws(()=>parseProject(JSON.stringify(legacy)),/invalid hourColor/);
+});

@@ -3758,8 +3758,8 @@
       return original.polygons.map((p) => p.map((r) => r.map(([x2, y]) => [snap2(placed.x + (x2 - original.x) * placed.scale), snap2(placed.y + (y - original.y) * placed.scale)])));
     }));
   }
-  function hourLayoutMarkup(layout, project) {
-    return layout.labels.map((label) => `<path data-hour="${label.hour}" aria-label="${label.text}" d="${label.polygons.map((p) => p.map((r) => r.map(([x2, y], i2) => {
+  function hourLayoutMarkup(layout, project, colors2 = null) {
+    return layout.labels.map((label) => `<path data-hour="${label.hour}" aria-label="${label.text}"${colors2 ? ` fill="${colors2[label.hour]}"` : ""} d="${label.polygons.map((p) => p.map((r) => r.map(([x2, y], i2) => {
       const point = project(x2, y);
       return `${i2 ? "L" : "M"}${point[0]} ${point[1]}`;
     }).join("") + "Z").join("")).join("")}" fill-rule="evenodd"/>`).join("");
@@ -5097,8 +5097,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
 
   // project.js
   var MAX_PROJECT_BYTES = 12 * 1024 * 1024;
-  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}), svgBacking: false, svgBackingThickness: 1.2, svgBackingMargin: 3, hourFit: true, mechanismRecess: false, recessWidth: 55, recessHeight: 55, recessDepth: 5.5, recessClearance: 0.5, mechanismMount: "box", mechanismWall: 1.6, mechanismFlatFront: true });
-  var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"], mechanismMount: ["box", "recess"] };
+  var DEFAULT_SETTINGS = Object.freeze({ design: "petal", projectName: "My Clock", color: 0, texture: "ripple", diameter: 200, thickness: 3, hole: 8, markers: true, hourStyle: "ticks", hourColor: "light", numberSize: 100, numberPosition: 100, exportFormat: "stl", svgDetail: "artwork", svgRelief: 0.8, svgTone: "contrast", showHands: true, threeMFTarget: "bambu-a1", filamentCount: 4, bambuBackColor: "background", bambuColors: Object.freeze({}), svgBacking: false, svgBackingThickness: 1.2, svgBackingMargin: 3, hourFit: true, mechanismRecess: false, recessWidth: 55, recessHeight: 55, recessDepth: 5.5, recessClearance: 0.5, mechanismMount: "box", mechanismWall: 1.6, mechanismFlatFront: true });
+  var choices = { design: [...designs.map((d) => d.id), "custom"], texture: ["smooth", "ripple", "grain"], hourStyle: ["ticks", "arabic", "roman"], hourColor: ["light", "dark", "auto"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"], mechanismMount: ["box", "recess"] };
   var ranges = { color: [0, 6, 1], diameter: [100, 300, 1], thickness: [2, 10, 0.5], hole: [5, 15, 0.1], numberSize: [70, 130, 5], numberPosition: [80, 120, 5], svgRelief: [0, 2, 0.2], svgBackingThickness: [1, 10, 0.2], svgBackingMargin: [1, 12, 0.5], recessWidth: [5, 90, 0.5], recessHeight: [5, 90, 0.5], recessDepth: [0.5, 8, 0.1], recessClearance: [0, 2, 0.1], mechanismWall: [1.2, 4, 0.2] };
   var bytes = (value) => new TextEncoder().encode(value).byteLength;
   var record2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -5330,6 +5330,19 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return { fits: fit(x2, y) || fit(y, x2), rotated: !fit(x2, y) && fit(y, x2) };
   }
 
+  // filament-texture.js
+  function filamentTexture(map, width, colors2) {
+    const rgb3 = colors2.map((color) => [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16))), data = new Uint8Array(width * width * 4);
+    for (let y = 0; y < width; y++) for (let x2 = 0; x2 < width; x2++) {
+      const color = rgb3[map[y * width + x2]], at = ((width - 1 - y) * width + x2) * 4;
+      data[at] = color[0];
+      data[at + 1] = color[1];
+      data[at + 2] = color[2];
+      data[at + 3] = 255;
+    }
+    return data;
+  }
+
   // filament-preview.js
   function analyze(painting, settings, workerURL2, signal) {
     return new Promise((resolve, reject) => {
@@ -5384,10 +5397,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     });
   }
   var FilamentPreview = class {
-    constructor({ workerURL: workerURL2, prepareRaster, onColorChange, onReset }) {
+    constructor({ workerURL: workerURL2, prepareRaster, onColorChange, onReset, onReady = () => {
+    } }) {
       this.workerURL = workerURL2;
       this.prepareRaster = prepareRaster;
       this.onColorChange = onColorChange;
+      this.onReady = onReady;
       this.root = document.getElementById("filamentPreview");
       this.body = document.getElementById("filamentProofBody");
       this.status = document.getElementById("filamentProofStatus");
@@ -5421,6 +5436,13 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     dispose() {
       this.cancel();
       this.cached = null;
+      this.textureCache = null;
+    }
+    meshColors() {
+      if (this.mode !== "print" || !this.current?.enabled || this.current.busy || this.cached?.key !== this.current.key) return null;
+      const { paint } = this.cached, mapped = filamentColors(paint.palette, this.current.overrides), key = JSON.stringify([this.cached.key, mapped.colors]);
+      if (this.textureCache?.key !== key) this.textureCache = { key, data: filamentTexture(paint.map, paint.width, mapped.colors), width: paint.width, palette: mapped.palette, base: mapped.colors[0] };
+      return this.textureCache;
     }
     update(current) {
       this.current = current;
@@ -5544,6 +5566,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         }
       }
       context.putImageData(image, 0, 0);
+      this.onReady();
     }
   };
 
@@ -5758,6 +5781,65 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     }
   };
 
+  // quick-setup.js
+  function flatColorClock(settings) {
+    return { ...settings, thickness: 3, svgDetail: "artwork", markers: true, hourStyle: "arabic", hourColor: "auto", hourFit: true, numberSize: 100, numberPosition: 100, mechanismRecess: true, mechanismMount: "box", mechanismFlatFront: true, mechanismWall: 1.6, recessWidth: 55, recessHeight: 55, recessDepth: 5.5, recessClearance: 0.5, exportFormat: "3mf", threeMFTarget: "bambu-a1", filamentCount: 4 };
+  }
+
+  // print-readiness.js
+  function printReadiness({ settings, stats = null, error = null, hours = null, invalid = null, plate = { width: 220, depth: 220 }, plateValid = true, loading = false, checking = false }) {
+    const items = [], add = (id, tone, text, action = null, label = null) => items.push({ id, tone, text, action, label });
+    if (loading) return { tone: "neutral", title: "Opening your design…", items: [], action: null };
+    if (invalid) add("dimensions", "error", "Finish the highlighted size or mechanism measurement.", "dimensions", "Edit measurements");
+    if (hours?.missing?.length) add("hours", "error", `${hours.labels.length}/12 complete hours fit this SVG. A round backing can support all 12.`, "hours", "Fit all 12 hours");
+    if (error && !hours?.missing?.length) {
+      const backing = settings.design === "custom" && /solid clock face|inside solid material/.test(error);
+      const room = /leave at least/.test(error);
+      add("geometry", "error", error, backing ? "backing" : room ? "room" : "check", backing ? "Add a backing" : room ? "Make room for the pocket" : "Check again");
+    }
+    if (flatMechanismBox(settings) && settings.exportFormat === "stl" && (settings.markers || settings.design === "custom" && settings.svgDetail === "artwork")) add("colors", "warning", "STL keeps the flat shape and box. Flat SVG artwork and hour numbers need a color 3MF.", "colors", "Keep the artwork colors");
+    if (!plateValid) add("printer", "error", "Enter a valid printer width and depth.", "printer", "Edit build plate");
+    else if (stats && !bedFit(stats.dimensions, plate.width, plate.depth).fits) add("plate", "warning", `This model exceeds your ${plate.width} × ${plate.depth} mm build plate.`, "fit", "Make it fit");
+    if (stats?.components > 1) add("parts", "warning", `${stats.components} separate pieces. Add a backing to print the artwork as one piece.`, settings.design === "custom" ? "backing" : null, "Join the pieces");
+    if (settings.mechanismRecess && !flatMechanismBox(settings)) add("orientation", "warning", "Inspect the rear mount and review print orientation and supports in your slicer.", "back", "Inspect the back");
+    if (!stats && !error && !invalid && !hours?.missing?.length) add("unchecked", "neutral", "Check this version of the design before slicing. Changes to its shape need a fresh check.", "check", "Check this design");
+    if (checking) return { tone: "neutral", title: "Checking this design…", items, action: null };
+    const first = items.find((i2) => i2.tone === "error") || items.find((i2) => i2.tone === "warning") || items[0];
+    if (first) return { tone: first.tone, title: first.tone === "error" ? "Finish the print setup" : first.tone === "warning" ? "Review before slicing" : "Check your print", items, action: first.action, label: first.label };
+    add("ready", "success", `One closed piece · ${stats.dimensions.map((v) => Number(v.toFixed(1))).join(" × ")} mm · fits your build plate.`);
+    if (flatMechanismBox(settings)) add("flat", "success", "Flat front on the bed, with the open mechanism box pointing up.");
+    return { tone: "success", title: "Ready for your slicer", items, action: "preview", label: "Inspect the print mesh" };
+  }
+
+  // hour-contrast.js
+  var rgb2 = (color) => [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16));
+  var brightness = (color) => (color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722) / 255;
+  function defaultHourInk(settings) {
+    return settings.hourColor === "dark" || settings.hourColor === "auto" && brightness(rgb2(settings.faceColor || "#C47F62")) > 0.58 ? "#24382D" : "#F5E5CD";
+  }
+  function hourInkColors(rgba, n, frame, layout, settings) {
+    if (settings.hourColor !== "auto" || settings.svgDetail === "silhouette") return Object.fromEntries(layout.labels.map((label) => [label.hour, defaultHourInk(settings)]));
+    const histogram = /* @__PURE__ */ new Map(), step = Math.max(1, Math.floor(n / 64));
+    for (let y = 0; y < n; y += step) for (let x2 = 0; x2 < n; x2 += step) {
+      const at = (y * n + x2) * 4;
+      if (rgba[at + 3] < 240) continue;
+      const color = "#" + [0, 1, 2].map((k) => rgba[at + k].toString(16).padStart(2, "0")).join("").toUpperCase();
+      histogram.set(color, (histogram.get(color) || 0) + 1);
+    }
+    const colors2 = [...histogram].filter(([, count]) => count >= 3).sort((a, b) => brightness(rgb2(a[0])) - brightness(rgb2(b[0])));
+    const dark = colors2.length && brightness(rgb2(colors2[0][0])) < 0.55 ? colors2[0][0] : "#24382D", light = colors2.length && brightness(rgb2(colors2.at(-1)[0])) > 0.75 ? colors2.at(-1)[0] : "#F5E5CD";
+    const dominant = [...histogram].sort((a, b) => b[1] - a[1])[0]?.[0] || settings.faceColor || "#C47F62", base = rgb2(dominant);
+    return Object.fromEntries(layout.labels.map((label) => {
+      let sum = 0, count = 0;
+      for (const polygon of label.polygons) for (const ring of polygon) for (let i2 = 0; i2 < ring.length; i2 += Math.max(1, Math.floor(ring.length / 16))) {
+        const [x2, y] = ring[i2], px = Math.round(x2 / frame.scale + frame.cx), py = Math.round(frame.cy - y / frame.scale), at = (py * n + px) * 4, inside = px >= 0 && py >= 0 && px < n && py < n, a = inside ? rgba[at + 3] / 255 : 0;
+        sum += brightness(base.map((value, k) => inside ? rgba[at + k] * a + value * (1 - a) : value));
+        count++;
+      }
+      return [label.hour, sum / Math.max(1, count) > 0.58 ? dark : light];
+    }));
+  }
+
   // app.js
   var $ = (id) => document.getElementById(id);
   var colors = [["Terracotta", "#c47f62"], ["Oat milk", "#dfd5bd"], ["Sage", "#94a18a"], ["Forest", "#485c48"], ["Ink", "#434643"], ["Lavender", "#aaa0b5"], ["Dusty rose", "#c99d99"]];
@@ -5834,7 +5916,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return settings.design === "custom" && settings.svgDetail === "artwork";
   }
   function geometryKey(settings = state) {
-    return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone, settings.svgBacking, settings.svgBacking ? [settings.svgBackingThickness, settings.svgBackingMargin] : null, settings.hourFit] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? settings.hourStyle : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null, settings.mechanismRecess ? [settings.mechanismMount, settings.mechanismFlatFront, settings.mechanismWall, settings.recessWidth, settings.recessHeight, settings.recessDepth, settings.recessClearance] : false]);
+    return JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgRelief, settings.svgTone, settings.svgBacking, settings.svgBacking ? [settings.svgBackingThickness, settings.svgBackingMargin] : null, settings.hourFit] : null, settings.diameter, settings.thickness, settings.hole, originalArtwork(settings) ? "smooth" : settings.texture, settings.markers, settings.markers ? [settings.hourStyle, settings.hourColor] : null, settings.markers && settings.hourStyle !== "ticks" ? [settings.numberSize, settings.numberPosition] : null, settings.mechanismRecess ? [settings.mechanismMount, settings.mechanismFlatFront, settings.mechanismWall, settings.recessWidth, settings.recessHeight, settings.recessDepth, settings.recessClearance] : false]);
   }
   function fileKey(settings = state) {
     return JSON.stringify([geometryKey(settings), settings.exportFormat, settings.exportFormat === "3mf" ? [colors[settings.color][1], settings.threeMFTarget, settings.threeMFTarget === "bambu-a1" ? [settings.filamentCount, settings.bambuBackColor, Object.entries(settings.bambuColors).sort()] : null] : null]);
@@ -5884,21 +5966,21 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return usesSVGBacking(state) ? `<g transform="${backingViewTransform()}">${markup}</g>` : markup;
   }
   function render({ forceInputs = false, historyGroup = null, recordHistory = true } = {}) {
-    const color = colors[state.color][1], detailed = originalArtwork(), backed = usesSVGBacking(state), flat = flatMechanismBox(state), visibleTexture = flat ? "smooth" : state.texture;
-    const nextPreviewKey = JSON.stringify([state.design, state.color, visibleTexture, state.markers, state.hourStyle, state.numberSize, state.numberPosition, state.diameter, state.svgDetail, customRevision, artworkOrientation, backed, state.hourFit, backed || autoHourFit(state) ? [state.svgBackingMargin, state.hole] : null]);
+    const color = colors[state.color][1], detailed = originalArtwork(), backed = usesSVGBacking(state), flat = flatMechanismBox(state), visibleTexture = flat ? "smooth" : state.texture, hourInk = defaultHourInk({ ...state, faceColor: color });
+    const nextPreviewKey = JSON.stringify([state.design, state.color, visibleTexture, state.markers, state.hourStyle, state.hourColor, state.numberSize, state.numberPosition, state.diameter, state.svgDetail, customRevision, artworkOrientation, backed, state.hourFit, backed || autoHourFit(state) ? [state.svgBackingMargin, state.hole] : null]);
     if (nextPreviewKey !== previewKey) {
       let ticks = "", numberClearance = "";
       if (state.markers && state.hourStyle !== "ticks") {
-        ticks = `<g id="hourNumerals" fill="#f5e5cd">${hourNumeralMarkup(state)}</g>`;
+        ticks = `<g id="hourNumerals" fill="${hourInk}">${hourNumeralMarkup(state)}</g>`;
         numberClearance = `<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2 * 400 / state.diameter}" stroke-linejoin="round">${hourNumeralMarkup(state)}</g></mask>`;
       }
-      if (state.markers && state.hourStyle === "ticks") for (let i2 = 0; i2 < 12; i2++) ticks += `<rect x="197.5" y="76" width="5" height="${i2 % 3 === 0 ? 17 : 10}" rx="2" transform="rotate(${i2 * 30} 200 200)" fill="#f5e5cd" opacity=".9"/>`;
+      if (state.markers && state.hourStyle === "ticks") for (let i2 = 0; i2 < 12; i2++) ticks += `<rect x="197.5" y="76" width="5" height="${i2 % 3 === 0 ? 17 : 10}" rx="2" transform="rotate(${i2 * 30} 200 200)" fill="${hourInk}" opacity=".9"/>`;
       if (backed) ticks = `<g transform="translate(200 200) scale(0.9) translate(-200 -200)">${ticks}</g>`;
       if (autoHourFit(state)) {
-        const { layout, frame, n } = sourceInfo(designSnapshot()), project = backed ? (x2, y) => [200 + x2 * 360 / state.diameter, 200 - y * 360 / state.diameter] : (x2, y) => [(x2 / frame.scale + frame.cx) * 400 / n, (frame.cy - y / frame.scale) * 400 / n];
-        const markup = hourLayoutMarkup(layout, project);
-        ticks = `<g id="hourOverlay" fill="#f5e5cd"><g${state.hourStyle !== "ticks" ? ' id="hourNumerals"' : ""}>${markup}</g></g>`;
-        if (state.hourStyle !== "ticks") numberClearance = `<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2 * (backed ? 360 / state.diameter : 400 / (n * frame.scale))}" stroke-linejoin="round">${markup}</g></mask>`;
+        const { layout, frame, n, hourColors } = sourceInfo(designSnapshot()), project = backed ? (x2, y) => [200 + x2 * 360 / state.diameter, 200 - y * 360 / state.diameter] : (x2, y) => [(x2 / frame.scale + frame.cx) * 400 / n, (frame.cy - y / frame.scale) * 400 / n];
+        const markup = hourLayoutMarkup(layout, project, hourColors);
+        ticks = `<g id="hourOverlay" fill="${hourInk}"><g${state.hourStyle !== "ticks" ? ' id="hourNumerals"' : ""}>${markup}</g></g>`;
+        if (state.hourStyle !== "ticks") numberClearance = `<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2 * (backed ? 360 / state.diameter : 400 / (n * frame.scale))}" stroke-linejoin="round">${hourLayoutMarkup(layout, project)}</g></mask>`;
       }
       $("clockSvg").innerHTML = `<defs><mask id="faceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><g fill="white" stroke="none">${faceMarkup()}</g></mask>${numberClearance}<pattern id="ridges" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M-4 4L4 12M4 -4L12 4" stroke="#402e21" opacity=".12" stroke-width=".8"/><path d="M8 0L0 8" stroke="#fff" opacity=".14" stroke-width=".7"/></pattern><radialGradient id="light" cx="30%" cy="20%" r="90%"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#24190d" stop-opacity=".13"/></radialGradient></defs><g mask="url(#faceMask)"><rect width="400" height="400" fill="${color}"/><g${numberClearance ? ' mask="url(#numberClearanceMask)"' : ""}>${visibleTexture === "ripple" ? Array.from({ length: 44 }, (_, i2) => `<circle cx="200" cy="200" r="${12 + i2 * 4}" fill="none" stroke="${i2 % 2 ? "#fff0da" : "#774832"}" stroke-opacity="${i2 % 2 ? ".18" : ".23"}" stroke-width=".8"/>`).join("") : visibleTexture === "grain" ? '<rect width="400" height="400" fill="url(#ridges)"/>' : ""}</g><rect width="400" height="400" fill="url(#light)"/>${ticks}</g><g id="previewHands" style="filter:drop-shadow(1px 3px 2px #0003)"><path d="M197 206L193 142Q193 138 197 138L202 138L204 206Z" transform="rotate(-59 200 200)" fill="#f4ebd7"/><path d="M197 212L197 102Q197 98 200 98Q203 98 203 102L203 212Z" transform="rotate(49 200 200)" fill="#f4ebd7"/><circle cx="200" cy="200" r="8" fill="#e6ce9d"/><circle cx="200" cy="200" r="3" fill="#c1a46e"/></g>`;
       if (detailed) {
@@ -5974,6 +6056,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("downloadGuide").hidden = lastDownloadKey !== fileKey();
     $("hourStyle").value = state.hourStyle;
     $("hourStyle").disabled = !state.markers;
+    $("hourColor").value = state.hourColor;
+    $("hourColor").disabled = !state.markers;
     $("hourFit").checked = state.hourFit;
     $("hourFitControls").hidden = state.design !== "custom" || !state.markers;
     const fitted = autoHourFit(state) ? sourceInfo(designSnapshot()).layout : null;
@@ -6005,6 +6089,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("showHands").checked = state.showHands;
     const hands = $("clockSvg").querySelector("#previewHands");
     if (hands) hands.toggleAttribute("hidden", !state.showHands);
+    $("mechanismQuickSummary").textContent = raisedMechanismBox(state) ? `${state.recessWidth} × ${state.recessHeight} mm movement · ${state.recessDepth} mm box · ${Number(artworkSurfaceHeight(state).toFixed(1))} mm face` : state.mechanismRecess ? `${state.recessWidth} × ${state.recessHeight} mm pocket · ${state.recessDepth} mm deep` : `${state.hole.toFixed(1)} mm center hole · optional rear box`;
     $("mechanismRecess").checked = state.mechanismRecess;
     $("recessOptions").hidden = !state.mechanismRecess;
     $("mechanismMount").value = state.mechanismMount;
@@ -6047,6 +6132,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("redo").disabled = busy || !history.canRedo;
     $("openProject").disabled = $("saveProject").disabled = busy;
     $("projectUpload").disabled = busy;
+    $("applyClockSetup").disabled = busy;
   }
   async function restoreHistory(action) {
     if (importPending || restorePending || deletingArtwork || applyingHistory) return;
@@ -6182,6 +6268,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
     }
     $("export").disabled = !!invalid || importPending || deletingArtwork || restorePending || !!exportController;
+    updateReadiness();
     $("showFitTest").disabled = $("hole").value === "" || !$("hole").validity.valid || importPending || deletingArtwork || restorePending || !!exportController;
     return !invalid;
   }
@@ -6244,8 +6331,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       $(id).value = state[id];
     }
   });
-  for (const id of ["hourStyle", "exportFormat", "svgDetail", "svgTone", "threeMFTarget", "filamentCount", "bambuBackColor", "mechanismMount"]) $(id).addEventListener("change", () => {
-    const value = id === "filamentCount" ? Number($(id).value) : $(id).value, allowed = { hourStyle: ["ticks", "arabic", "roman"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"], mechanismMount: ["box", "recess"] }[id];
+  for (const id of ["hourStyle", "hourColor", "exportFormat", "svgDetail", "svgTone", "threeMFTarget", "filamentCount", "bambuBackColor", "mechanismMount"]) $(id).addEventListener("change", () => {
+    const value = id === "filamentCount" ? Number($(id).value) : $(id).value, allowed = { hourStyle: ["ticks", "arabic", "roman"], hourColor: ["light", "dark", "auto"], exportFormat: ["stl", "3mf"], svgDetail: ["artwork", "silhouette"], svgTone: ["contrast", "dark", "light"], threeMFTarget: ["bambu-a1", "standard"], filamentCount: [2, 4], bambuBackColor: ["background", "face"], mechanismMount: ["box", "recess"] }[id];
     if (!allowed.includes(value)) return;
     state[id] = value;
     if (id === "mechanismMount") makeRecessRoom();
@@ -6285,6 +6372,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     } else if (flat && !bambu) $("exportFormatHint").textContent = "3MF keeps the flat SVG artwork and numbers as a color texture. Export is front-down with the rear box pointing up. Texture support depends on your slicer.";
     showFilamentPalette(exportCache?.key === fileKey() ? exportCache.palette : null);
     updateFilamentPreview();
+    updateMeshAppearance();
     if (!exportController) $("export").innerHTML = `Download ${format} <span>↓</span>`;
   }
   function showFilamentPalette(palette) {
@@ -6307,6 +6395,20 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     state.threeMFTarget = "bambu-a1";
     setBuildPlate(256, 256, "a1");
     render();
+  };
+  $("applyClockSetup").onclick = () => {
+    if (importPending || restorePending || deletingArtwork || applyingHistory) return;
+    history.endGroup();
+    state = flatColorClock(state);
+    setBuildPlate(256, 256, "a1");
+    render({ forceInputs: true });
+    history.endGroup();
+    toast("A1 color setup applied: flat front, 55 mm rear box and 12 fitted numbers.");
+  };
+  $("editMechanism").onclick = () => {
+    document.querySelector(".advanced-settings").open = true;
+    $("mechanismRecess").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("mechanismRecess").focus({ preventScroll: true });
   };
   $("downloadAgain").onclick = () => $("export").click();
   for (const id of ["thickness", "hole"]) $(id).addEventListener("blur", () => {
@@ -6801,14 +6903,15 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     if (flatMechanismBox(settings) && settings.exportFormat === "stl") $("downloadNote").textContent = "STL contains the flat clock shape and rear box. Choose Bambu A1 · colors to keep flat SVG artwork and hour numbers in the print.";
     toast(fileKey() === key ? "Your print file is ready. Next steps are below the download button." : `Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
   }
-  function paintHourDetails(context, settings, frame = null, layout = null) {
+  function paintHourDetails(context, settings, frame = null, layout = null, hourColors = null) {
     if (!settings.markers) return;
     context.save();
-    context.fillStyle = "#f5e5cd";
+    context.fillStyle = defaultHourInk(settings);
     if (layout) {
       const scale = 400 / (frame.n * frame.scale);
       context.transform(scale, 0, 0, -scale, frame.cx * 400 / frame.n, frame.cy * 400 / frame.n);
       for (const label of layout.labels) {
+        context.fillStyle = hourColors?.[label.hour] || defaultHourInk(settings);
         const path2 = label.polygons.map((p) => p.map((r) => r.map(([x2, y], i2) => `${i2 ? "L" : "M"}${x2} ${y}`).join("") + "Z").join("")).join("");
         context.fill(new Path2D(path2), "evenodd");
       }
@@ -6851,17 +6954,17 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     return { canvas, context, n, rgba, alpha };
   }
   function sourceInfo(snapshot, raw = null) {
-    const s = snapshot.settings, key = JSON.stringify([snapshot.revision, snapshot.placement, s.design, s.diameter, s.hole, s.svgBacking, s.svgBackingMargin, s.markers, s.hourStyle, s.numberSize, s.numberPosition, s.hourFit]);
+    const s = snapshot.settings, key = JSON.stringify([snapshot.revision, snapshot.placement, s.design, s.diameter, s.hole, s.svgBacking, s.svgBackingMargin, s.markers, s.hourStyle, s.numberSize, s.numberPosition, s.hourFit, s.hourColor, s.faceColor, s.svgDetail]);
     if (sourceInfoCache?.key === key) return sourceInfoCache;
     raw ||= sourceRaster(snapshot);
     const frame = artworkFrame(raw.alpha, raw.n, s.diameter, s), layout = autoHourFit(s) ? fitHourLayout(raw.alpha, raw.n, frame, s) : null;
-    sourceInfoCache = { key, frame, n: raw.n, layout };
+    sourceInfoCache = { key, frame, n: raw.n, layout, hourColors: layout ? hourInkColors(raw.rgba, raw.n, frame, layout, s) : null };
     return sourceInfoCache;
   }
   function paintedRaster(snapshot, raw = null) {
     const settings = snapshot.settings;
     raw ||= sourceRaster(snapshot);
-    const { frame: sourceFrame, layout } = sourceInfo(snapshot, raw), n = raw.n, backed = usesSVGBacking(settings);
+    const { frame: sourceFrame, layout, hourColors } = sourceInfo(snapshot, raw), n = raw.n, backed = usesSVGBacking(settings);
     let canvas = raw.canvas, context = raw.context, frame = sourceFrame;
     if (backed) {
       canvas = document.createElement("canvas");
@@ -6881,7 +6984,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       context.fillRect(0, 0, 400, 400);
     }
     context.globalCompositeOperation = backed && autoHourFit(settings) ? "source-over" : "source-atop";
-    paintHourDetails(context, settings, frame, layout);
+    paintHourDetails(context, settings, frame, layout, hourColors);
     return { canvas, frame, sourceFrame, n, rgba: context.getImageData(0, 0, n, n).data };
   }
   async function ensureMesh(snapshot, signal, onStage = () => {
@@ -6901,7 +7004,8 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         }
         jobSignal.throwIfAborted();
         const mesh = await meshAsync(raw.alpha, raw.n, { ...settings, exportFormat: "stl" }, jobSignal, null, artwork, stage);
-        return { stlBuffer: mesh.stlBuffer, stats: mesh.stats, artwork: artwork ? { texture: artwork.texture } : null };
+        const frame = usesSVGBacking(settings) ? { scale: settings.diameter / raw.n, cx: raw.n / 2, cy: raw.n / 2, n: raw.n } : sourceInfo(snapshot, raw).frame;
+        return { stlBuffer: mesh.stlBuffer, stats: mesh.stats, artwork: { ...artwork ? { texture: artwork.texture } : {}, surface: artworkPlacement(settings, frame) } };
       }, { signal, onStage });
       if (lastGeometryError?.key === geometry) lastGeometryError = null;
       updatePrintSummary();
@@ -6920,10 +7024,91 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   }
   function updateFilamentPreview() {
     const snapshot = designSnapshot(), settings = snapshot.settings;
-    const key = JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgBacking, settings.svgBacking ? settings.svgBackingMargin : null, settings.hourFit, settings.markers ? settings.hole : null] : null, settings.diameter, settings.faceColor, settings.markers ? [settings.hourStyle, settings.numberSize, settings.numberPosition] : false, settings.filamentCount, settings.bambuBackColor]);
+    const key = JSON.stringify([settings.design, settings.design === "custom" ? [customRevision, ...artworkOrientation, settings.svgDetail, settings.svgBacking, settings.svgBacking ? settings.svgBackingMargin : null, settings.hourFit, settings.markers ? settings.hole : null] : null, settings.diameter, settings.faceColor, settings.markers ? [settings.hourStyle, settings.hourColor, settings.numberSize, settings.numberPosition] : false, settings.filamentCount, settings.bambuBackColor]);
     filamentPreview.update({ enabled: state.exportFormat === "3mf" && state.threeMFTarget === "bambu-a1", busy: importPending || restorePending || deletingArtwork, key, snapshot, overrides: state.bambuColors });
   }
   var stageMessage = (stage) => ({ outline: "Tracing the clock outline…", details: "Adding the printable details…", mesh: "Closing the print mesh…", package: "Preparing your 3MF file…", filaments: "Mapping your SVG colors to printable filaments…" })[stage] || "Checking your model…";
+  var readinessKey = "";
+  var readinessAction = null;
+  function updateReadiness() {
+    const key = geometryKey(), loading = importPending || restorePending || deletingArtwork;
+    const invalid = ["diameterNumber", "thickness", "hole", ...state.mechanismRecess ? mountFields() : []].find((id) => $(id).value === "" || !$(id).validity.valid);
+    const report = printReadiness({ settings: state, stats: meshStore.peek(key)?.stats, error: lastGeometryError?.key === key ? lastGeometryError.message : null, hours: !loading && autoHourFit(state) ? sourceInfo(designSnapshot()).layout : null, invalid, plate: bed, plateValid: [$("bedWidth"), $("bedDepth")].every((input) => input.value !== "" && input.validity.valid), loading, checking: !!checkController && key === checkKey });
+    readinessAction = report.action;
+    $("readinessAction").hidden = !report.action;
+    $("readinessAction").textContent = report.label || "Check this design";
+    const signature = JSON.stringify(report);
+    if (signature === readinessKey) return;
+    readinessKey = signature;
+    $("printReadiness").dataset.tone = report.tone;
+    $("readinessHeading").textContent = report.title;
+    $("readinessBadge").textContent = report.tone === "success" ? "Checked" : report.tone === "error" ? "Needs attention" : report.tone === "warning" ? "Review" : "Needs a check";
+    $("readinessList").replaceChildren(...report.items.map((item) => {
+      const li = document.createElement("li"), text = document.createElement("span");
+      li.dataset.tone = item.tone;
+      li.dataset.check = item.id;
+      text.textContent = item.text;
+      li.append(text);
+      if (item.action && item.action !== report.action) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "readiness-link";
+        button.dataset.action = item.action;
+        button.textContent = item.label;
+        li.append(button);
+      }
+      return li;
+    }));
+  }
+  async function runReadinessAction(action) {
+    if (importPending || restorePending || deletingArtwork) return;
+    if (action === "dimensions") {
+      validateDimensions(true);
+      return;
+    }
+    if (action === "printer") {
+      $("bedSettings").open = true;
+      $("bedWidth").focus();
+      return;
+    }
+    if (action === "hours" || action === "backing") {
+      enableSupportingBacking();
+      await $("checkModel").onclick();
+      return;
+    }
+    if (action === "room") {
+      makeRecessRoom();
+      render({ forceInputs: true });
+      await $("checkModel").onclick();
+      return;
+    }
+    if (action === "colors") {
+      $("bambuColorPrint").click();
+      return;
+    }
+    if (action === "fit") {
+      $("fitToBed").click();
+      await $("checkModel").onclick();
+      return;
+    }
+    if (action === "back") {
+      setPreviewMode("print");
+      meshCamera("back");
+      $("preview").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (action === "preview") {
+      setPreviewMode("print");
+      $("preview").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (action === "check") await $("checkModel").onclick();
+  }
+  $("readinessAction").onclick = () => runReadinessAction(readinessAction);
+  $("readinessList").onclick = (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (button) runReadinessAction(button.dataset.action);
+  };
   function updatePrintSummary() {
     const key = geometryKey(), result = meshStore.peek(key), stats = result?.stats;
     if (checkController && key !== checkKey) checkController.abort();
@@ -6959,6 +7144,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     $("connectArtwork").disabled = !!checkController || importPending || restorePending || deletingArtwork;
     holeFit.update();
     if (meshView) meshView.setBed(bed.width, bed.depth, fit?.fits !== false, $("meshBed").checked);
+    updateReadiness();
   }
   function saveBuildPlate() {
     try {
@@ -7012,6 +7198,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     checkKey = snapshot.geometry;
     $("checkModel").disabled = true;
     $("checkModel").textContent = "Checking…";
+    updateReadiness();
     try {
       await ensureMesh(snapshot, controller.signal, (stage) => {
         if (snapshot.geometry === geometryKey()) $("printCheckStatus").textContent = stageMessage(stage);
@@ -7084,7 +7271,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       meshPreviewController?.abort();
       meshPreviewController = null;
       meshPreviewKey = key;
-      meshView.setAppearance(snapshot.settings.faceColor, $("meshColors").checked, $("meshWireframe").checked);
+      updateMeshAppearance();
       $("meshState").hidden = true;
       $("meshCanvas").hidden = false;
       meshView.setVisible(true);
@@ -7132,7 +7319,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
         $("meshCanvas").dataset.triangles = String(result.stats.triangles);
         $("meshCanvas").hidden = false;
         $("meshState").hidden = true;
-        meshView.setAppearance(colors[state.color][1], $("meshColors").checked, $("meshWireframe").checked);
+        updateMeshAppearance();
         meshView.setVisible(true);
         updatePrintSummary();
       } catch (error) {
@@ -7154,7 +7341,14 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     loadedMeshKey = meshPreviewKey = null;
     scheduleMeshPreview(true);
   };
-  for (const id of ["meshColors", "meshWireframe"]) $(id).onchange = () => meshView?.setAppearance(colors[state.color][1], $("meshColors").checked, $("meshWireframe").checked);
+  function updateMeshAppearance() {
+    if (!meshView || loadedMeshKey !== geometryKey()) return;
+    const proof = filamentPreview.meshColors();
+    meshView.setFilaments(proof);
+    meshView.setAppearance(colors[state.color][1], $("meshColors").checked, $("meshWireframe").checked);
+    $("meshColorLabel").textContent = proof ? "Print colors" : "SVG colors";
+  }
+  for (const id of ["meshColors", "meshWireframe"]) $(id).onchange = updateMeshAppearance;
   $("meshBed").onchange = updatePrintSummary;
   $("openProject").onclick = () => $("projectUpload").click();
   $("saveProject").onclick = () => {
@@ -7296,7 +7490,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     delete $("hole").dataset.editing;
     render();
   } });
-  var filamentPreview = new FilamentPreview({ workerURL, prepareRaster: prepareFilamentRaster, onColorChange: (source, color, final) => {
+  var filamentPreview = new FilamentPreview({ workerURL, prepareRaster: prepareFilamentRaster, onReady: updateMeshAppearance, onColorChange: (source, color, final) => {
     const overrides = { ...state.bambuColors };
     if (source === color.toUpperCase()) delete overrides[source];
     else overrides[source] = color;
