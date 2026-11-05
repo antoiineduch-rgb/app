@@ -9,6 +9,7 @@ export const SETTINGS=[
   ['proofPrinted','Print colors','Colors','filament ams palette spool couleur couleurs bambu'],
   ['myProjects','Saved clocks','Projects','library saved projects bibliotheque projets enregistrer'],
   ['presetsTab','Ready-made shapes','Shape','design presets formes'],
+  ['pasteSvg','Paste SVG code','SVG','clipboard coller presse papiers source code importer'],
   ['svgDetail','SVG appearance','SVG','original silhouette artwork detail'],
   ['svgRelief','SVG detail relief','SVG','raised texture depth details relief'],
   ['artRotateLeft','Rotate or flip SVG','SVG','orientation mirror tourner rotation miroir'],

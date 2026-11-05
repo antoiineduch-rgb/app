@@ -27,6 +27,7 @@ import {downloadFile} from './file-downloads.js';
 import {PreviewWorkspace} from './preview-workspace.js';
 import {ProjectLibrary,projectThumbnail} from './project-library-ui.js';
 import {SettingsFinder} from './settings-finder.js';
+import {ImportWorkflow} from './import-workflow.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial=DEFAULT_SETTINGS;
@@ -42,7 +43,7 @@ try{
     if(artworkId){restoreReference={id:artworkId,useCustom:saved.design==='custom',orientation:[...artworkOrientation]};restorePending=true;}
   }
 }catch{}
-let activeArtwork=null,gallerySequence=0,deletingArtwork=false,settingsSaved=true,projectLibrary=null,projectOpeningSequence=null;
+let activeArtwork=null,gallerySequence=0,deletingArtwork=false,settingsSaved=true,projectLibrary=null,projectOpeningSequence=null,quickImport=null;
 let customSVG=null,customArtwork=null,customImage=null,customRevision=0,revisionCounter=0,importSequence=0,importPending=false,zoom=1,rx=12,ry=-19,rz=-7;
 const outlines=new Map(designs.map(d=>[d.id,shapePath(d.id)]));
 const workerURL=new URL('./export-worker.js',document.currentScript?.src||location.href);
@@ -223,7 +224,7 @@ document.addEventListener('keydown',event=>{
   if(key==='s'){event.preventDefault();$('saveProject').click();}
   else if(key==='o'){event.preventDefault();$('openProject').click();}
   else if(key==='k'){event.preventDefault();const modal=document.querySelector('dialog[open]');if(modal?.id==='projectsDialog'){$('projectSearch').focus();$('projectSearch').select();}else if(!modal)settingsFinder.focus();}
-  else if(!editing&&(key==='z'||key==='y')){event.preventDefault();if($('projectsDialog').open){if(key==='z'&&!event.shiftKey)projectLibrary?.undoDelete();}else restoreHistory(key==='y'||event.shiftKey?'redo':'undo');}
+  else if(!editing&&(key==='z'||key==='y')){event.preventDefault();if($('pasteSvgDialog').open)return;if($('projectsDialog').open){if(key==='z'&&!event.shiftKey)projectLibrary?.undoDelete();}else restoreHistory(key==='y'||event.shiftKey?'redo':'undo');}
 });
 designs.forEach(d=>{const b=document.createElement('button');b.className='design-card';b.dataset.design=d.id;b.innerHTML=`<svg viewBox="0 0 400 400" aria-hidden="true"><path d="${outlines.get(d.id)}" fill="${d.id==='petal'?'#bf977b':'#c5c9b6'}"/><path d="M200 130V200L245 227" fill="none" stroke="#f7f5e9" stroke-width="10" stroke-linecap="round"/></svg>${d.name}`;b.onclick=()=>{cancelRestoration();state.design=d.id;render();};$('designGrid').append(b);});
 colors.forEach(([name,color],i)=>{const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=name;b.setAttribute('aria-label',name);b.onclick=()=>{state.color=i;render();};$('swatches').append(b);});
@@ -359,6 +360,7 @@ $('clockStage').addEventListener('keydown',event=>{
 });
 $('reset').onclick=()=>{
   projectLibrary?.close();
+  quickImport?.closePaste();
   setPreviewMode('design');
   applyingHistory=false;
   importSequence++;restorePending=false;restoreReference=null;importPending=false;activeArtwork=null;
@@ -433,10 +435,11 @@ async function importArtwork(file){
   $('uploadStatus').textContent=`Opening ${file.name}…`;updateArtworkUI();
   try{
     if(file.size>SVG_IMPORT_MAX_BYTES)throw Error('Please choose an SVG smaller than 5 MB.');
-    const source=await file.text(),prepared=await prepareSVG(source);
+    const source=await file.text();if(sequence!==importSequence)return;
+    const prepared=await prepareSVG(source);
     if(sequence!==importSequence)return;
     const record={id:null,name:file.name,source,size:file.size,thumbnail:thumbnailFor(prepared.image)};
-    activateArtwork(prepared,record);
+    activateArtwork(prepared,record);tab(true);
     let saved=false;
     try{
       const stored=await saveSVG(record);
@@ -450,9 +453,11 @@ async function importArtwork(file){
     if(saved)$('uploadStatus').textContent=`Loaded ${activeArtwork.name}. Saved on this device for next time.`;
     toast(saved?'Your SVG is ready and saved on this device.':'Your SVG is ready. It is available for this session only.');
     refreshGallery();
+    return true;
   }catch(error){
     if(sequence!==importSequence)return;
     $('uploadStatus').textContent=`Couldn’t import ${file.name}: ${error.message}`;toast(error.message);
+    return false;
   }finally{
     if(sequence===importSequence){importPending=false;$('uploadPanel').setAttribute('aria-busy','false');$('export').disabled=!!exportController;updateArtworkUI();persist();checkpointHistory();updateHistoryUI();scheduleMeshPreview();}
   }
@@ -479,12 +484,6 @@ async function loadSavedArtwork(id,{restoring=false,useCustom=true,orientation=n
   }
 }
 $('svgUpload').onchange=async event=>{const file=event.target.files[0];event.target.value='';await importArtwork(file);};
-$('svgDropZone').addEventListener('dragover',event=>{event.preventDefault();if(deletingArtwork)return;event.dataTransfer.dropEffect='copy';$('svgDropZone').classList.add('drag-active');});
-$('svgDropZone').addEventListener('dragleave',()=>$('svgDropZone').classList.remove('drag-active'));
-$('svgDropZone').addEventListener('drop',event=>{event.preventDefault();$('svgDropZone').classList.remove('drag-active');importArtwork(event.dataTransfer.files[0]);});
-// Files dropped outside the upload area should never navigate away from the editor.
-window.addEventListener('dragover',event=>{if([...event.dataTransfer.types].includes('Files'))event.preventDefault();});
-window.addEventListener('drop',event=>{if([...event.dataTransfer.types].includes('Files'))event.preventDefault();});
 $('replaceArtwork').onclick=()=>$('svgUpload').click();
 $('useArtwork').onclick=()=>{if(activeArtwork&&!importPending){state.design='custom';render();}};
 for(const [id,action]of[['artRotateLeft','left'],['artRotateRight','right'],['artMirrorX','mirrorX'],['artMirrorY','mirrorY'],['artResetOrientation','reset']])$(id).onclick=()=>{
@@ -808,9 +807,12 @@ async function openProjectSource(loadText){
   }catch(error){if(sequence===importSequence)toast('Could not open project: '+error.message);return false;}
   finally{if(sequence===importSequence){importPending=false;updateArtworkUI();persist();checkpointHistory();updateHistoryUI();updatePrintSummary();scheduleMeshPreview();}}
 }
-$('projectUpload').onchange=event=>{
-  const file=event.target.files[0];event.target.value='';if(!file||deletingArtwork)return;
+function openProjectFile(file){
+  if(!file||deletingArtwork)return;
   projectLibrary?.close();return openProjectSource(()=>{if(file.size>MAX_PROJECT_BYTES)throw Error('Choose a project smaller than 12 MB.');return file.text();});
+}
+$('projectUpload').onchange=event=>{
+  const file=event.target.files[0];event.target.value='';return openProjectFile(file);
 };
 window.addEventListener('pagehide',()=>{meshPreviewController?.abort();checkController?.abort();meshView?.dispose();filamentPreview.dispose();holeFit.dispose();});
 $('cancelExport').onclick=()=>exportController?.abort();
@@ -855,15 +857,16 @@ projectLibrary=new ProjectLibrary({getName:()=>state.projectName,isBusy:()=>impo
   if(importPending||restorePending||deletingArtwork||applyingHistory)throw Error('Wait for your artwork to finish opening, then save a copy.');
   const text=serializeProject(state,activeArtwork,artworkOrientation),thumbnail=includeThumbnail?await projectThumbnail($('clockSvg')):'';return {text,thumbnail};
 }});
+quickImport=new ImportWorkflow({onSVG:importArtwork,onProject:openProjectFile,isBusy:()=>deletingArtwork||applyingHistory||!!projectLibrary?.busy,notify:toast,svgError:()=>$('uploadStatus').textContent});
 let settingHighlight=null,settingHighlightTimer=null;
 function jumpToSetting(entry){
   if(importPending||restorePending||deletingArtwork){toast('Wait for your artwork to finish opening, then choose a setting.');return;}
   if(entry.id==='myProjects'){projectLibrary.open();return;}
   let target=$(entry.id),message='';
   const svgOnly=['svgDetail','svgRelief','artRotateLeft','svgBacking','hourFit'];
-  if(entry.id==='svgUpload'||svgOnly.includes(entry.id)){
+  if(['svgUpload','pasteSvg'].includes(entry.id)||svgOnly.includes(entry.id)){
     tab(true);
-    if(entry.id!=='svgUpload'&&state.design!=='custom'){target=activeArtwork?$('useArtwork'):$('svgUpload');message='Choose or import SVG artwork to use this setting.';}
+    if(!['svgUpload','pasteSvg'].includes(entry.id)&&state.design!=='custom'){target=activeArtwork?$('useArtwork'):$('svgUpload');message='Choose or import SVG artwork to use this setting.';}
     else if(entry.id==='svgRelief'&&flatFrontOnBed(state)){document.querySelector('.advanced-settings').open=true;target=$(state.deskStand?'deskStand':'mechanismFlatFront');message='Flat-front printing pauses raised artwork. The rear-accessory controls explain this option.';}
     else if(entry.id==='svgRelief'&&state.svgDetail!=='artwork'){target=$('svgDetail');message='Choose Original artwork + details to adjust SVG relief.';}
   }

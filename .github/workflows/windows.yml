@@ -79,6 +79,9 @@ jobs:
       - name: Test saved clocks, storage recovery, and setting navigation
         run: npm run test:projects
 
+      - name: Test file drops, native clipboard SVG, and safe import recovery
+        run: npm run test:quick-import
+
       - name: Build Windows installer
         run: npm run dist:win
 

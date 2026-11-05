@@ -16,6 +16,7 @@ function editHistory(action,window=mainWindow){
   window.webContents.executeJavaScript(`(() => {
     const active=document.activeElement;
     if(active?.matches('textarea,[contenteditable="true"],input:not([type="range"]):not([type="checkbox"])'))return false;
+    if(document.getElementById('pasteSvgDialog')?.open)return true;
     if(document.getElementById('projectsDialog')?.open){
       const restore=document.getElementById('undoProjectDelete');
       if(${JSON.stringify(action)}==='undo'&&restore&&!restore.hidden&&!restore.disabled)restore.click();

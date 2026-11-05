@@ -1,6 +1,6 @@
 {
   "name": "clock-factory",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -25,7 +25,8 @@
     "test:desk-stand": "npm run build && electron tests/desk-stand.electron.cjs",
     "test:performance": "npm run build && electron tests/performance.electron.cjs",
     "test:workspace": "npm run build && electron tests/workspace.electron.cjs",
-    "test:projects": "npm run build && electron tests/projects.electron.cjs"
+    "test:projects": "npm run build && electron tests/projects.electron.cjs",
+    "test:quick-import": "npm run build && electron tests/quick-import.electron.cjs"
   },
   "engines": {
     "node": ">=22.12.0"
