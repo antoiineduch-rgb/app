@@ -35,6 +35,7 @@ export class PrintView{
   setVisible(visible){if(this.visible===visible)return;this.visible=visible;if(visible)this.resize();}
   async setModel(result,settings,{signal}={}){
     signal?.throwIfAborted();
+    this.textureSequence=(this.textureSequence||0)+1;
     this.faceDown=flatFrontOnBed(settings);
     this.deskPose=settings.deskStand?standPose(settings,-result.stats.max[1],artworkSurfaceHeight(settings)):null;
     const sequence=++this.sequence,view=new DataView(result.stlBuffer),count=view.getUint32(80,true);
@@ -69,6 +70,17 @@ export class PrintView{
     this.span=Math.max(...result.stats.dimensions.slice(0,2));this.controls.minDistance=this.span*.35;this.controls.maxDistance=this.span*6;
     this.setAppearance(settings.faceColor,this.colored,this.wireframe);this.setView('angle');this.resize();
     this.canvas.dataset.triangles=String(count);this.canvas.dataset.vertices=String(result.stats.vertices);this.canvas.dataset.span=String(this.span);
+    this.canvas.dataset.modelLoads=String(sequence);
+  }
+  async setTexture(texture,{signal}={}){
+    const sequence=this.textureSequence=(this.textureSequence||0)+1,model=this.model;let map=null;
+    if(texture){
+      const url=URL.createObjectURL(new Blob([texture.png],{type:'image/png'}));
+      try{const image=new Image();image.src=url;await image.decode();map=new Texture(image);map.colorSpace=SRGBColorSpace;map.needsUpdate=true;}
+      finally{URL.revokeObjectURL(url);}
+    }
+    if(sequence!==this.textureSequence||this.model!==model||signal?.aborted){map?.dispose();signal?.throwIfAborted();return;}
+    this.texture?.dispose();this.texture=map;this.appearanceKey=null;this.setAppearance(this.color,this.colored,this.wireframe);
   }
   setAppearance(color,colored=this.colored,wireframe=this.wireframe){
     this.color=color;this.colored=colored;this.wireframe=wireframe;if(!this.model)return;
@@ -114,5 +126,5 @@ export class PrintView{
     this.controls.update();this.render();
   }
   zoom(factor){const offset=this.camera.position.clone().sub(this.controls.target);offset.setLength(Math.max(this.controls.minDistance,Math.min(this.controls.maxDistance,offset.length()*factor)));this.camera.position.copy(this.controls.target).add(offset);this.controls.update();this.render();}
-  dispose(){this.sequence++;if(this.frame!==null)cancelAnimationFrame(this.frame);this.observer.disconnect();this.controls.dispose();if(this.model){this.model.geometry.dispose();for(const material of this.model.material)material.dispose();}for(const object of this.bed||[]){object.geometry.dispose();object.material.dispose();}this.texture?.dispose();this.filamentTexture?.dispose();this.keyLight.shadow.map?.dispose();this.renderer.dispose();this.canvas.remove();}
+  dispose(){this.sequence++;this.textureSequence=(this.textureSequence||0)+1;if(this.frame!==null)cancelAnimationFrame(this.frame);this.observer.disconnect();this.controls.dispose();if(this.model){this.model.geometry.dispose();for(const material of this.model.material)material.dispose();}for(const object of this.bed||[]){object.geometry.dispose();object.material.dispose();}this.texture?.dispose();this.filamentTexture?.dispose();this.keyLight.shadow.map?.dispose();this.renderer.dispose();this.canvas.remove();}
 }

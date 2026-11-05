@@ -22,6 +22,7 @@ import {flatColorClock} from './quick-setup.js';
 import {printReadiness} from './print-readiness.js';
 import {defaultHourInk,hourInkColors} from './hour-contrast.js';
 import {standDimensions} from './stand-settings.js';
+import {sourceKey,frameKey,layoutKey,paintKey,filamentKey} from './artwork-keys.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial=DEFAULT_SETTINGS;
@@ -44,12 +45,14 @@ const workerURL=new URL('./export-worker.js',document.currentScript?.src||locati
 const meshViewURL=new URL('./mesh-view.js',document.currentScript?.src||location.href);
 const history=new DesignHistory(),meshStore=new MeshStore(2);
 let toastTimer,saveTimer,previewKey='',exportCache=null,lastDownloadKey=null,exportController=null,applyingHistory=false,backingViewCache=null,sourceInfoCache=null,lastGeometryError=null,meshCameraView='angle';
+let sourceRasterCache=null,frameInfoCache=null,layoutInfoCache=null,paintCache=null,loadedTextureKey=null;
+function clearArtworkCache(){sourceRasterCache=frameInfoCache=layoutInfoCache=sourceInfoCache=paintCache=backingViewCache=null;filamentPreview.clear();}
 let previewMode='design',meshView=null,loadedMeshKey=null,meshPreviewKey=null,meshPreviewController=null,meshPreviewTimer=null,checkController=null,checkKey=null;
 let bed={width:220,depth:220},bedPreset='custom';
 try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500)){bed={width:saved.width,depth:saved.depth};if(saved.preset==='a1'&&saved.width===256&&saved.depth===256)bedPreset='a1';}}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
-function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone,settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?[settings.hourStyle,settings.hourColor]:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.mechanismMount,settings.mechanismFlatFront,settings.mechanismWall,settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false,settings.deskStand?[settings.standWidth,settings.standDepth,settings.standLean]:false]);}
-function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[colors[settings.color][1],settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor,Object.entries(settings.bambuColors).sort()]:null]:null]);}
+function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,flatFrontOnBed(settings)?'flat':[settings.svgDetail,settings.svgRelief,settings.svgTone],settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)||flatFrontOnBed(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.mechanismMount,settings.mechanismFlatFront,settings.mechanismWall,settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false,settings.deskStand?[settings.standWidth,settings.standDepth,settings.standLean]:false]);}
+function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[paintKey({settings:{...settings,faceColor:colors[settings.color][1]},revision:customRevision,placement:artworkOrientation}),settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor,Object.entries(settings.bambuColors).sort()]:null]:null]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
 function updateSaveLabel(){
   document.querySelector('.local-status').textContent=restorePending?'Opening saved SVG…':importPending?'Saving SVG…':!settingsSaved?'Session only':activeArtwork&&!activeArtwork.id?'SVG: session only':'Saved on this device';
@@ -185,6 +188,7 @@ async function restoreHistory(action){
   const snapshot=history[action]();if(!snapshot)return;
   const sequence=++importSequence;applyingHistory=true;importPending=!!snapshot.artwork;
   restoreReference=null;restorePending=false;state={...snapshot.settings};artworkOrientation=[...snapshot.orientation];
+  if(customRevision!==snapshot.revision)clearArtworkCache();
   customSVG=snapshot.mask;customArtwork=snapshot.paint;customImage=snapshot.image;customRevision=snapshot.revision;
   activeArtwork=snapshot.artwork?{...snapshot.artwork,id:null}:null;
   for(const id of ['thickness','hole','diameterNumber'])delete $(id).dataset.editing;
@@ -336,6 +340,7 @@ $('reset').onclick=()=>{
   importSequence++;restorePending=false;restoreReference=null;importPending=false;activeArtwork=null;
   artworkOrientation=normalizeOrientation(null);$('uploadPanel').setAttribute('aria-busy','false');
   $('export').disabled=!!exportController;exportController?.abort();state={...initial};customSVG=customArtwork=customImage=null;lastDownloadKey=null;
+  clearArtworkCache();
   for(const id of ['thickness','hole','diameterNumber'])delete $(id).dataset.editing;
   $('svgUpload').value='';$('uploadStatus').textContent='';tab(false);$('restoreView').click();render({forceInputs:true});validateDimensions();toast('A fresh start. Your saved SVGs are still available.');
 };
@@ -391,6 +396,7 @@ function thumbnailFor(image){
   return canvas.toDataURL('image/png');
 }
 function activateArtwork(prepared,record,{useCustom=true,orientation=null}={}){
+  clearArtworkCache();
   customSVG=prepared.markup;customArtwork=prepared.artworkMarkup;customImage=prepared.image;customRevision=++revisionCounter;
   activeArtwork={...record};artworkOrientation=normalizeOrientation(orientation);
   if(useCustom)state.design='custom';
@@ -466,7 +472,7 @@ $('removeArtwork').onclick=async()=>{
   const removed=activeArtwork;deletingArtwork=true;updateArtworkUI();
   try{
     if(removed.id)await deleteSavedSVG(removed.id);
-    activeArtwork=null;customSVG=customArtwork=customImage=null;customRevision=++revisionCounter;restoreReference=null;artworkOrientation=normalizeOrientation(null);
+    activeArtwork=null;customSVG=customArtwork=customImage=null;customRevision=++revisionCounter;restoreReference=null;artworkOrientation=normalizeOrientation(null);clearArtworkCache();
     if(state.design==='custom')state.design='petal';
     $('uploadStatus').textContent=`Removed ${removed.name} from saved artwork.`;render();await refreshGallery();
   }catch(error){toast(error.message);}
@@ -482,7 +488,7 @@ function meshAsync(alpha,n,settings,signal,cachedSTL=null,artwork=null,onStage=(
     const abort=()=>finish(new DOMException('Export cancelled','AbortError'));
     const fallback=()=>{
       if(settled||fallingBack)return;fallingBack=true;clearTimeout(timer);worker?.terminate();
-      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();const mesh=cachedSTL||makeClockSTL(alpha,n,settings,undefined,artwork),stats=cachedStats||analyzeSTL(mesh);let buffer=mesh,palette=null;if(settings.exportFormat==='3mf'){if(settings.threeMFTarget==='bambu-a1'){const result=stlToBambu3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,painting:artwork?.painting,maxColors:settings.filamentCount,backColor:settings.bambuBackColor,colorOverrides:settings.bambuColors});buffer=result.buffer;palette=result.palette;}else buffer=stlTo3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,artwork:artwork?.texture});}finish(null,{buffer,stlBuffer:mesh,stats,palette});}catch(error){finish(error);}},0);
+      setTimeout(()=>{if(settled)return;try{signal.throwIfAborted();const mesh=cachedSTL||makeClockSTL(alpha,n,settings,undefined,artwork),stats=cachedStats||analyzeSTL(mesh);let buffer=mesh,palette=null;if(settings.exportFormat==='3mf'){if(settings.threeMFTarget==='bambu-a1'){const result=stlToBambu3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,painting:artwork?.painting,analysis:artwork?.analysis,maxColors:settings.filamentCount,backColor:settings.bambuBackColor,colorOverrides:settings.bambuColors});buffer=result.buffer;palette=result.palette;}else buffer=stlTo3MF(mesh,{name:'Clock Factory clock face',color:settings.faceColor,artwork:artwork?.texture});}finish(null,{buffer,stlBuffer:mesh,stats,palette});}catch(error){finish(error);}},0);
     };
     signal.addEventListener('abort',abort,{once:true});
     if(signal.aborted){abort();return;}
@@ -496,11 +502,12 @@ function meshAsync(alpha,n,settings,signal,cachedSTL=null,artwork=null,onStage=(
       };
       worker.onerror=event=>{event.preventDefault();fallback();};
       const copy=(cachedSTL||alpha.buffer).slice(0);
-      const transferredArtwork=artwork?{rgba:artwork.rgba?.slice(),texture:artwork.texture?{...artwork.texture,png:artwork.texture.png.slice()}:null,painting:artwork.painting?{...artwork.painting,rgba:artwork.painting.rgba.slice()}:null}:null;
+      const transferredArtwork=artwork?{rgba:artwork.rgba?.slice(),texture:artwork.texture&&!(settings.exportFormat==='3mf'&&settings.threeMFTarget==='bambu-a1')?{...artwork.texture,png:artwork.texture.png.slice()}:null,painting:artwork.painting?{...artwork.painting,rgba:artwork.analysis?undefined:artwork.painting.rgba.slice()}:null,analysis:artwork.analysis?{...artwork.analysis,map:artwork.analysis.map.slice()}:null}:null;
       const transfers=[copy];
       if(transferredArtwork?.rgba)transfers.push(transferredArtwork.rgba.buffer);
       if(transferredArtwork?.texture)transfers.push(transferredArtwork.texture.png.buffer);
-      if(transferredArtwork?.painting)transfers.push(transferredArtwork.painting.rgba.buffer);
+      if(transferredArtwork?.painting?.rgba)transfers.push(transferredArtwork.painting.rgba.buffer);
+      if(transferredArtwork?.analysis)transfers.push(transferredArtwork.analysis.map.buffer);
       worker.postMessage({id:1,...(cachedSTL?{stlBuffer:copy}:{alpha:copy}),n,settings,artwork:transferredArtwork,stats:cachedStats},transfers);
       timer=setTimeout(fallback,60000);
     }catch{fallback();}
@@ -542,56 +549,64 @@ function paintHourDetails(context,settings,frame=null,layout=null,hourColors=nul
 }
 function designSnapshot(){const settings={...state,faceColor:colors[state.color][1]};return {settings,geometry:geometryKey(settings),image:customImage,placement:[...artworkOrientation],revision:customRevision};}
 function sourceRaster(snapshot){
+  const key=sourceKey(snapshot);if(sourceRasterCache?.key===key)return sourceRasterCache;
   const {settings,image,placement}=snapshot,n=Math.ceil(settings.diameter/.15),canvas=document.createElement('canvas');canvas.width=canvas.height=n;
   const context=canvas.getContext('2d',{willReadFrequently:true});context.scale(n/400,n/400);
   if(settings.design==='custom')drawPlacedArtwork(context,image,placement);else{context.fillStyle='#fff';context.fill(new Path2D(outlines.get(settings.design)));}
   const rgba=context.getImageData(0,0,n,n).data,alpha=new Uint8Array(n*n);for(let i=0;i<alpha.length;i++)alpha[i]=rgba[i*4+3];
-  return {canvas,context,n,rgba,alpha};
+  sourceRasterCache={key,canvas,n,rgba,alpha};return sourceRasterCache;
 }
 function sourceInfo(snapshot,raw=null){
-  const s=snapshot.settings,key=JSON.stringify([snapshot.revision,snapshot.placement,s.design,s.diameter,s.hole,s.svgBacking,s.svgBackingMargin,s.markers,s.hourStyle,s.numberSize,s.numberPosition,s.hourFit,s.hourColor,s.faceColor,s.svgDetail]);
+  const s=snapshot.settings,fkey=frameKey(snapshot),lkey=layoutKey(snapshot),key=JSON.stringify([lkey,s.hourColor,s.hourColor==='auto'?[s.faceColor,s.svgDetail]:null]);
   if(sourceInfoCache?.key===key)return sourceInfoCache;
-  raw ||=sourceRaster(snapshot);const frame=artworkFrame(raw.alpha,raw.n,s.diameter,s),layout=autoHourFit(s)?fitHourLayout(raw.alpha,raw.n,frame,s):null;
+  raw ||=sourceRaster(snapshot);
+  if(frameInfoCache?.key!==fkey)frameInfoCache={key:fkey,frame:artworkFrame(raw.alpha,raw.n,s.diameter,s)};
+  const frame=frameInfoCache.frame;
+  if(layoutInfoCache?.key!==lkey)layoutInfoCache={key:lkey,layout:autoHourFit(s)?fitHourLayout(raw.alpha,raw.n,frame,s):null};
+  const layout=layoutInfoCache.layout;
   sourceInfoCache={key,frame,n:raw.n,layout,hourColors:layout?hourInkColors(raw.rgba,raw.n,frame,layout,s):null};return sourceInfoCache;
 }
 function paintedRaster(snapshot,raw=null){
+  const key=paintKey(snapshot);if(paintCache?.key===key)return paintCache;
   const settings=snapshot.settings;raw ||=sourceRaster(snapshot);
-  const {frame:sourceFrame,layout,hourColors}=sourceInfo(snapshot,raw),n=raw.n,backed=usesSVGBacking(settings);
-  let canvas=raw.canvas,context=raw.context,frame=sourceFrame;
+  const {frame:sourceFrame,layout,hourColors}=sourceInfo(snapshot,raw),n=raw.n,backed=usesSVGBacking(settings),canvas=document.createElement('canvas');canvas.width=canvas.height=n;
+  const context=canvas.getContext('2d',{willReadFrequently:true});let frame=sourceFrame;
+  if(!backed)context.drawImage(raw.canvas,0,0);
+  context.scale(n/400,n/400);
   if(backed){
-    canvas=document.createElement('canvas');canvas.width=canvas.height=n;context=canvas.getContext('2d',{willReadFrequently:true});context.scale(n/400,n/400);
     context.save();const scale=sourceFrame.scale*n/settings.diameter;context.transform(scale,0,0,scale,200-sourceFrame.cx*sourceFrame.scale*400/settings.diameter,200-sourceFrame.cy*sourceFrame.scale*400/settings.diameter);drawPlacedArtwork(context,snapshot.image,snapshot.placement);context.restore();
     frame={scale:settings.diameter/n,cx:n/2,cy:n/2,n};
   }
   if(!originalArtwork(settings)){context.globalCompositeOperation='source-in';context.fillStyle=settings.faceColor;context.fillRect(0,0,400,400);}
   context.globalCompositeOperation=backed&&autoHourFit(settings)?'source-over':'source-atop';paintHourDetails(context,settings,frame,layout,hourColors);
-  return {canvas,frame,sourceFrame,n,rgba:context.getImageData(0,0,n,n).data};
+  paintCache={key,canvas,frame,sourceFrame,n,rgba:context.getImageData(0,0,n,n).data};return paintCache;
 }
-async function ensureMesh(snapshot,signal,onStage=()=>{}){
+function paintedPNG(paint){
+  if(!paint.png)paint.png=new Promise(resolve=>paint.canvas.toBlob(resolve,'image/png')).then(async blob=>{
+    if(!blob)throw Error('The SVG color artwork could not be prepared.');return new Uint8Array(await blob.arrayBuffer());
+  }).catch(error=>{paint.png=null;throw error;});
+  return paint.png;
+}
+async function ensureMesh(snapshot,signal,onStage=()=>{},{withTexture=true}={}){
   const {settings,geometry}=snapshot;
   try{
-    const result=await meshStore.get(geometry,async(jobSignal,stage)=>{
-      jobSignal.throwIfAborted();stage('outline');const raw=sourceRaster(snapshot);let artwork=null;
-      if(originalArtwork(settings)||flatFrontOnBed(settings)){
-        const paint=paintedRaster(snapshot,raw),png=await new Promise(resolve=>paint.canvas.toBlob(resolve,'image/png'));jobSignal.throwIfAborted();
-        if(!png)throw Error('The SVG color artwork could not be prepared.');
-        artwork={rgba:raw.rgba,texture:{png:new Uint8Array(await png.arrayBuffer()),...artworkPlacement(settings,paint.frame)}};
-      }
-      jobSignal.throwIfAborted();const mesh=await meshAsync(raw.alpha,raw.n,{...settings,exportFormat:'stl'},jobSignal,null,artwork,stage);
+    const mesh=await meshStore.get(geometry,async(jobSignal,stage)=>{
+      jobSignal.throwIfAborted();stage('outline');const raw=sourceRaster(snapshot),artwork=originalArtwork(settings)&&!flatFrontOnBed(settings)?{rgba:raw.rgba}:null;
+      const result=await meshAsync(raw.alpha,raw.n,{...settings,exportFormat:'stl'},jobSignal,null,artwork,stage);
       const frame=usesSVGBacking(settings)?{scale:settings.diameter/raw.n,cx:raw.n/2,cy:raw.n/2,n:raw.n}:sourceInfo(snapshot,raw).frame;
-      return {stlBuffer:mesh.stlBuffer,stats:mesh.stats,artwork:{...(artwork?{texture:artwork.texture}:{}),surface:artworkPlacement(settings,frame)}};
+      return {stlBuffer:result.stlBuffer,stats:result.stats,artwork:{surface:artworkPlacement(settings,frame)}};
     },{signal,onStage});
-    if(lastGeometryError?.key===geometry)lastGeometryError=null;updatePrintSummary();return result;
+    signal.throwIfAborted();let artwork=mesh.artwork;
+    if(withTexture&&(originalArtwork(settings)||flatFrontOnBed(settings))){const paint=paintedRaster(snapshot),png=await paintedPNG(paint);signal.throwIfAborted();artwork={...artwork,texture:{png,...artworkPlacement(settings,paint.frame)}};}
+    if(lastGeometryError?.key===geometry)lastGeometryError=null;updatePrintSummary();return {...mesh,artwork};
   }catch(error){if(error.name!=='AbortError'){lastGeometryError={key:geometry,message:error.message};updatePrintSummary();}throw error;}
 }
 function prepareFilamentRaster(snapshot){
   const paint=paintedRaster(snapshot);return {rgba:paint.rgba,width:paint.n,height:paint.n,...artworkPlacement(snapshot.settings,paint.frame)};
 }
 function updateFilamentPreview(){
-  const snapshot=designSnapshot(),settings=snapshot.settings;
-  // Relief, thickness, hole size and recoloring do not change SVG quantization.
-  const key=JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgBacking,settings.svgBacking?settings.svgBackingMargin:null,settings.hourFit,settings.markers?settings.hole:null]:null,settings.diameter,settings.faceColor,settings.markers?[settings.hourStyle,settings.hourColor,settings.numberSize,settings.numberPosition]:false,settings.filamentCount,settings.bambuBackColor]);
-  filamentPreview.update({enabled:state.exportFormat==='3mf'&&state.threeMFTarget==='bambu-a1',busy:importPending||restorePending||deletingArtwork,key,snapshot,overrides:state.bambuColors});
+  const snapshot=designSnapshot();
+  filamentPreview.update({enabled:state.exportFormat==='3mf'&&state.threeMFTarget==='bambu-a1',busy:importPending||restorePending||deletingArtwork,key:filamentKey(snapshot),snapshot,overrides:state.bambuColors});
 }
 const stageMessage=stage=>({outline:'Tracing the clock outline…',details:'Adding the printable details…',mesh:'Closing the print mesh…',package:'Preparing your 3MF file…',filaments:'Mapping your SVG colors to printable filaments…'}[stage]||'Checking your model…');
 let readinessKey='',readinessAction=null;
@@ -687,7 +702,7 @@ $('checkModel').onclick=async()=>{
   const controller=new AbortController(),snapshot=designSnapshot();checkController=controller;checkKey=snapshot.geometry;
   $('checkModel').disabled=true;$('checkModel').textContent='Checking…';
   updateReadiness();
-  try{await ensureMesh(snapshot,controller.signal,stage=>{if(snapshot.geometry===geometryKey())$('printCheckStatus').textContent=stageMessage(stage);});}
+  try{await ensureMesh(snapshot,controller.signal,stage=>{if(snapshot.geometry===geometryKey())$('printCheckStatus').textContent=stageMessage(stage);},{withTexture:false});}
   catch(error){if(error.name!=='AbortError')toast('Could not check model: '+error.message);}
   finally{if(checkController===controller){checkController=null;$('checkModel').disabled=false;$('checkModel').textContent='Check model';updatePrintSummary();}}
 };
@@ -705,15 +720,16 @@ function setPreviewMode(mode){
   if(mode==='design'){clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=null;$('meshCanvas').hidden=$('meshState').hidden=true;meshView?.setVisible(false);}
   else scheduleMeshPreview(true);
 }
+function inspectionKey(snapshot=designSnapshot()){return JSON.stringify([snapshot.geometry,originalArtwork(snapshot.settings)||flatFrontOnBed(snapshot.settings)?paintKey(snapshot):null]);}
 function scheduleMeshPreview(immediate=false){
   if(previewMode!=='print')return;
-  const snapshot=designSnapshot(),key=snapshot.geometry;
+  const snapshot=designSnapshot(),key=snapshot.geometry,textureKey=originalArtwork(snapshot.settings)||flatFrontOnBed(snapshot.settings)?paintKey(snapshot):null,requestedView=inspectionKey(snapshot);
   if(importPending||restorePending||deletingArtwork){
     clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=null;$('meshCanvas').hidden=true;$('meshState').hidden=false;$('meshStateText').textContent='Opening your artwork…';return;
   }
-  if(key===loadedMeshKey&&meshView){clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=key;updateMeshAppearance();$('meshState').hidden=true;$('meshCanvas').hidden=false;meshView.setVisible(true);return;}
-  if(key===meshPreviewKey&&(meshPreviewController||meshPreviewTimer))return;
-  clearTimeout(meshPreviewTimer);meshPreviewController?.abort();meshPreviewKey=key;
+  if(key===loadedMeshKey&&textureKey===loadedTextureKey&&meshView){clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=requestedView;updateMeshAppearance();$('meshState').hidden=true;$('meshCanvas').hidden=false;meshView.setVisible(true);return;}
+  if(requestedView===meshPreviewKey&&(meshPreviewController||meshPreviewTimer))return;
+  clearTimeout(meshPreviewTimer);meshPreviewController?.abort();meshPreviewKey=requestedView;
   meshView?.setVisible(false);
   $('meshCanvas').hidden=true;$('meshState').hidden=false;$('meshRetry').hidden=true;$('meshStateText').textContent='Preparing your printable model…';$('meshState').dataset.loading='true';
   meshPreviewTimer=setTimeout(async()=>{
@@ -721,18 +737,19 @@ function scheduleMeshPreview(immediate=false){
     try{
       const result=await ensureMesh(snapshot,controller.signal,stage=>{if(!controller.signal.aborted)$('meshStateText').textContent=stageMessage(stage);});
       controller.signal.throwIfAborted();
-      if(previewMode!=='print'||key!==geometryKey())return;
-      if(!meshView){const {PrintView}=await import(meshViewURL.href);controller.signal.throwIfAborted();meshView=new PrintView($('meshCanvas'),{onError:error=>{meshView?.dispose();meshView=null;loadedMeshKey=null;$('meshCanvas').hidden=true;$('meshState').hidden=false;$('meshStateText').textContent=error.message;$('meshRetry').hidden=false;}});}
-      await meshView.setModel(result,snapshot.settings,{signal:controller.signal});controller.signal.throwIfAborted();meshCamera(meshCameraView);
-      if(previewMode!=='print'||key!==geometryKey())return;
-      loadedMeshKey=key;$('meshCanvas').dataset.geometryKey=key;$('meshCanvas').dataset.triangles=String(result.stats.triangles);
+      if(previewMode!=='print'||requestedView!==inspectionKey())return;
+      if(!meshView){const {PrintView}=await import(meshViewURL.href);controller.signal.throwIfAborted();meshView=new PrintView($('meshCanvas'),{onError:error=>{meshView?.dispose();meshView=null;loadedMeshKey=loadedTextureKey=null;$('meshCanvas').hidden=true;$('meshState').hidden=false;$('meshStateText').textContent=error.message;$('meshRetry').hidden=false;}});}
+      if(loadedMeshKey===key)await meshView.setTexture(result.artwork?.texture,{signal:controller.signal});
+      else await meshView.setModel(result,snapshot.settings,{signal:controller.signal});controller.signal.throwIfAborted();meshCamera(meshCameraView);
+      if(previewMode!=='print'||requestedView!==inspectionKey())return;
+      loadedMeshKey=key;loadedTextureKey=textureKey;$('meshCanvas').dataset.textureKey=textureKey||'';$('meshCanvas').dataset.geometryKey=key;$('meshCanvas').dataset.triangles=String(result.stats.triangles);
       $('meshCanvas').hidden=false;$('meshState').hidden=true;updateMeshAppearance();meshView.setVisible(true);updatePrintSummary();
-    }catch(error){if(error.name!=='AbortError'&&previewMode==='print'&&key===geometryKey()){$('meshState').hidden=false;$('meshState').dataset.loading='false';$('meshStateText').textContent=meshStore.peek(key)?'The print model is checked, but 3D graphics are unavailable on this device. You can still download your model.':`Could not prepare this model: ${error.message}`;$('meshRetry').hidden=false;meshPreviewKey=null;}}
+    }catch(error){if(error.name!=='AbortError'&&previewMode==='print'&&requestedView===inspectionKey()){$('meshState').hidden=false;$('meshState').dataset.loading='false';$('meshStateText').textContent=meshStore.peek(key)?'The print model is checked, but 3D graphics are unavailable on this device. You can still download your model.':`Could not prepare this model: ${error.message}`;$('meshRetry').hidden=false;meshPreviewKey=null;}}
     finally{if(meshPreviewController===controller)meshPreviewController=null;}
   },immediate?0:400);
 }
 $('designPreview').onclick=()=>setPreviewMode('design');$('printPreview').onclick=()=>setPreviewMode('print');
-$('meshRetry').onclick=()=>{loadedMeshKey=meshPreviewKey=null;scheduleMeshPreview(true);};
+$('meshRetry').onclick=()=>{loadedMeshKey=loadedTextureKey=meshPreviewKey=null;scheduleMeshPreview(true);};
 function updateMeshAppearance(){
   if(!meshView||loadedMeshKey!==geometryKey())return;
   const proof=filamentPreview.meshColors();meshView.setFilaments(proof);meshView.setAppearance(colors[state.color][1],$('meshColors').checked,$('meshWireframe').checked);
@@ -756,7 +773,7 @@ $('projectUpload').onchange=async event=>{
     state={...project.settings};artworkOrientation=project.orientation;
     if(prepared){customSVG=prepared.markup;customArtwork=prepared.artworkMarkup;customImage=prepared.image;activeArtwork={...project.artwork,id:null,size:new TextEncoder().encode(project.artwork.source).byteLength,thumbnail:thumbnailFor(prepared.image)};}
     else{customSVG=customArtwork=customImage=null;activeArtwork=null;}
-    customRevision=++revisionCounter;render({forceInputs:true});tab(state.design==='custom');
+    customRevision=++revisionCounter;clearArtworkCache();render({forceInputs:true});tab(state.design==='custom');
     if(activeArtwork){try{const saved=await saveSVG(activeArtwork);if(sequence!==importSequence)return;activeArtwork=saved;}catch(error){if(sequence!==importSequence)return;$('uploadStatus').textContent=error.message;}}
     if(sequence!==importSequence)return;
     if(activeArtwork)$('uploadStatus').textContent=`Loaded ${activeArtwork.name}. ${activeArtwork.id?'Saved on this device.':'Available for this session.'}`;
@@ -779,9 +796,9 @@ $('export').onclick=async()=>{
   try{
     controller.signal.throwIfAborted();
     const onStage=stage=>{$('exportStatus').textContent=stageMessage(stage);const progress=$('exportProgress').querySelector('progress');progress.max=100;progress.value={outline:15,details:40,mesh:70,filaments:80,package:90}[stage]||5;};
-    const mesh=await ensureMesh(snapshot,controller.signal,onStage);
+    const mesh=await ensureMesh(snapshot,controller.signal,onStage,{withTexture:settings.exportFormat==='3mf'&&settings.threeMFTarget==='standard'});
     let artwork=mesh.artwork;
-    if(settings.exportFormat==='3mf'&&settings.threeMFTarget==='bambu-a1'){onStage('filaments');artwork={...artwork,painting:prepareFilamentRaster(snapshot,mesh)};await new Promise(resolve=>setTimeout(resolve,0));controller.signal.throwIfAborted();}
+    if(settings.exportFormat==='3mf'&&settings.threeMFTarget==='bambu-a1'){onStage('filaments');artwork={...artwork,painting:prepareFilamentRaster(snapshot),analysis:filamentPreview.analysisFor(filamentKey(snapshot))};await new Promise(resolve=>setTimeout(resolve,0));controller.signal.throwIfAborted();}
     const result=settings.exportFormat==='3mf'?await meshAsync(null,0,settings,controller.signal,mesh.stlBuffer,artwork,onStage,mesh.stats):{buffer:mesh.stlBuffer};
     controller.signal.throwIfAborted();
     const blob=new Blob([result.buffer],{type:settings.exportFormat==='3mf'?'model/3mf':'model/stl'});exportCache={key,blob,palette:result.palette};showFilamentPalette(result.palette);

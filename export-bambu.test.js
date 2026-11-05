@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {unzipSync,strFromU8} from 'fflate';
 import {extrudeLayers} from './mesh-extrusion.js';
 import {stlToBambu3MF} from './export-bambu.js';
@@ -70,6 +71,21 @@ test('matching the SVG background avoids spending an extra AMS slot on the back'
 test('invalid inputs and unsupported filament counts fail with useful messages',()=>{
   assert.throws(()=>stlToBambu3MF(new ArrayBuffer(84)),/triangle count/);assert.throws(()=>filamentPaint(image(),'red',4),/back color/);assert.throws(()=>filamentPaint(image(),'#123456',3),/filaments/);
   assert.throws(()=>stlToBambu3MF(mesh(),{painting:{...image(),frame:null}}),/placement/);
+});
+test('reusing prepared filament indices produces byte-identical exports without RGBA pixels',()=>{
+  const painting=image(),source=filamentPaint(painting,'#112233',4,{mips:false}),analysis={palette:source.palette,map:source.map,width:source.width},lightweight={...painting};delete lightweight.rgba;
+  for(const colorOverrides of [{},{'#FF0000':'#00CC66','#0000FF':'#00CC66'}]){
+    const options={color:'#112233',backColor:'face',colorOverrides};
+    const regular=stlToBambu3MF(mesh(),{...options,painting}),prepared=stlToBambu3MF(mesh(),{...options,painting:lightweight,analysis});assert.deepEqual(new Uint8Array(prepared.buffer),new Uint8Array(regular.buffer));
+  }
+  assert.equal(source.mips,null);assert.equal(source.map.length,80*80,'prepared inputs remain reusable after export');
+  for(const bad of [{...analysis,width:81},{...analysis,map:new Uint8Array(1)},{...analysis,palette:['red']},{...analysis,map:analysis.map.map(()=>99)}])assert.throws(()=>stlToBambu3MF(mesh(),{painting:lightweight,analysis:bad}),/prepared filament map/);
+});
+test('optimized facet traversal preserves the established native paint subdivision stream',()=>{
+  const width=37,rgba=new Uint8ClampedArray(width*width*4),colors=[[229,57,53],[40,85,214],[62,142,65],[255,255,255]];
+  for(let y=0;y<width;y++)for(let x=0;x<width;x++)rgba.set([...colors[(Math.floor(x/5)+Math.floor(y/7))%4],255],(y*width+x)*4);
+  const paint=filamentPaint({rgba,width,height:width},'#FFFFFF',4),code=paintFacet([[-18,-18,3],[18,-18,3],[-18,18,3]],{n:width,scale:1,cx:18.5,cy:18.5},paint);
+  assert.equal(createHash('sha256').update(code).digest('hex'),'7a8bd2567f5a403021c81e94f5807b4abae73d67861dd4ec0880cfd986d6ff8f');
 });
 test('chosen spool colors merge matching regions into one actual painted filament',()=>{
   const raster=image(),source=filamentPaint(raster,'#112233',4),overrides={'#FF0000':'#00CC66','#0000FF':'#00CC66'},paint=recolorFilamentPaint(source,overrides);

@@ -1,11 +1,11 @@
 import { build } from 'esbuild';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-const options = { absWorkingDir: import.meta.dirname, bundle: true, format: 'iife', platform: 'browser', target: 'chrome120', charset: 'utf8', legalComments: 'eof' };
+const options = { absWorkingDir: import.meta.dirname, bundle: true, format: 'iife', platform: 'browser', target: 'chrome120', charset: 'utf8', legalComments: 'eof',minify:!process.argv.includes('--debug') };
 await Promise.all([
   build({ ...options, entryPoints: ['app.js'], outfile: 'studio.js' }),
   build({ ...options, entryPoints: ['export-worker-source.js'], outfile: 'export-worker.js' }),
-  build({ ...options, format:'esm',minify:true,entryPoints:['mesh-view-source.js'],outfile:'mesh-view.js' }),
+  build({ ...options, format:'esm',entryPoints:['mesh-view-source.js'],outfile:'mesh-view.js' }),
 ]);
 await Promise.all(['studio.js','export-worker.js','mesh-view.js'].map(async name => {
   const path=join(import.meta.dirname,name);

@@ -1,18 +1,20 @@
 import {strToU8,zipSync} from 'fflate';
 import {binarySTLTriangles,escapeXML} from './export-3mf.js';
-import {filamentPaint,paintFacet,filamentCode,dominantArtworkColor,recolorFilamentPaint} from './bambu-paint.js';
+import {filamentPaint,paintFacet,filamentCode,dominantArtworkColor,recolorFilamentPaint,restoredFilamentPaint} from './bambu-paint.js';
 import {paintedTriangle} from './artwork-surface.js';
 
 const header='<?xml version="1.0" encoding="UTF-8"?>';
 // Unsliced A1/0.4 project. The native Application prefix is Bambu's required
 // format discriminator; Creator records the real generator. Profile IDs refer
 // to Studio's installed presets. No temperatures or machine G-code are copied.
-export function stlToBambu3MF(buffer,{name='Clock Factory',color='#C47F62',painting=null,maxColors=4,backColor='background',colorOverrides={}}={}){
+export function stlToBambu3MF(buffer,{name='Clock Factory',color='#C47F62',painting=null,analysis=null,maxColors=4,backColor='background',colorOverrides={}}={}){
   if(typeof name!=='string')throw new TypeError('The model name must be text.');
   if(![2,4].includes(maxColors))throw Error('An A1 with AMS Lite supports up to 4 filaments. Choose 2 or 4 colors.');
   if(painting&&(!painting.frame||painting.frame.n!==painting.width||!Number.isFinite(painting.thickness)||painting.thickness<=0))throw Error('The SVG filament colors have an invalid placement.');
   if(!['background','face'].includes(backColor))throw Error('Choose a valid back color mode.');
-  const paint=recolorFilamentPaint(filamentPaint(painting,backColor==='background'?dominantArtworkColor(painting,color):color,maxColors),colorOverrides),title=escapeXML(name.trim()||'Clock Factory'),vertices=[],triangles=[],ids=new Map(),budget={nodes:0};
+  if(analysis&&(!painting||analysis.width!==painting.width))throw Error('The prepared filament map does not match the artwork.');
+  const prepared=analysis?restoredFilamentPaint(analysis,maxColors):filamentPaint(painting,backColor==='background'?dominantArtworkColor(painting,color):color,maxColors,{mips:false});
+  const paint=recolorFilamentPaint(prepared,colorOverrides),title=escapeXML(name.trim()||'Clock Factory'),vertices=[],triangles=[],ids=new Map(),budget={nodes:0};
   let minX=Infinity,minY=Infinity;
   const vertex=point=>{
     const key=point.join(',');let id=ids.get(key);

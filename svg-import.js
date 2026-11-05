@@ -91,6 +91,12 @@ async function svgImage(svg) {
   catch { throw Error('The SVG could not be drawn. Try exporting a plain SVG from your editor.'); }
   finally { URL.revokeObjectURL(url); }
 }
+function rasterDataURL(canvas){
+  return new Promise((resolve,reject)=>canvas.toBlob(blob=>{
+    if(!blob){reject(Error('The SVG preview could not be encoded. Try importing it again.'));return;}
+    const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('The SVG preview could not be read.'));reader.readAsDataURL(blob);
+  },'image/png'));
+}
 
 export async function prepareSVG(source) {
   const svg = sanitizedSVG(source);
@@ -169,10 +175,10 @@ export async function prepareSVG(source) {
   const fit = fitted.getContext('2d');
   const width=maxX-minX+1,height=maxY-minY+1,scale=(SVG_RASTER_SIZE*860/1024)/Math.max(width,height);
   fit.drawImage(canvas,minX,minY,width,height,(SVG_RASTER_SIZE-width*scale)/2,(SVG_RASTER_SIZE-height*scale)/2,width*scale,height*scale);
-  const artworkURL = fitted.toDataURL('image/png');
+  const artworkURL = await rasterDataURL(fitted);
   const image = new Image(); image.src = artworkURL; await image.decode();
   fit.globalCompositeOperation='source-in'; fit.fillStyle='#fff'; fit.fillRect(0,0,SVG_RASTER_SIZE,SVG_RASTER_SIZE);
-  const maskURL = fitted.toDataURL('image/png');
+  const maskURL = await rasterDataURL(fitted);
   return {
     markup: `<image x="0" y="0" width="400" height="400" href="${maskURL}"/>`,
     artworkMarkup: `<image x="0" y="0" width="400" height="400" href="${artworkURL}"/>`,

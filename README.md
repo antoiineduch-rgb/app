@@ -12,6 +12,27 @@ For static hosting, run `npm ci` followed by `npm run build` and serve `index.ht
 
 STL generation runs in a background worker so the editor stays usable while exporting. You can cancel an in-progress export. Preview, print checks, and download share in-progress builds; cancelling the preview cannot cancel a download using that model. The two most recent meshes and last print file are cached. Color, camera, and display changes reuse geometry. Hosts that block workers use a local fallback.
 
+## Performance
+
+Version 1.14 reuses the source raster, fitted hour positions, painted artwork, and filament analysis. These caches retain only their latest entry and are cleared when the source is replaced, removed, or reset. Geometry checks and STL/Bambu exports skip unused PNG encoding. Native Bambu exports reuse the preview's one-byte filament indices instead of transferring and quantizing four-byte RGBA pixels again. Changing hour contrast refreshes the original 3D texture while retaining the existing GPU mesh. SVG imports encode their large PNGs asynchronously.
+
+The following baseline run and two optimized runs used the same Linux cloud environment, Node.js 24.19, Electron 45.2.1 with software WebGL, and `tests/fixtures/detailed-artwork.svg` at 240 mm with a backing and the A1 quick setup. Optimized times show the range of those two runs. Times vary with hardware and load; the regression tests assert reuse and output correctness rather than timing thresholds.
+
+| Operation | 1.13 | 1.14 |
+| --- | ---: | ---: |
+| Import SVG and prepare printable colors | 2,787 ms | 2,098–2,591 ms |
+| Eleven face-color selections | 708 ms | 108–116 ms |
+| Three thickness changes and model checks | 1,210 ms | 916–1,189 ms |
+| Open the real 3D preview | 335 ms | 260–440 ms |
+| First native color 3MF | 1,633 ms | 686–919 ms |
+| Three spool edits and native 3MF exports | 4,685 ms | 1,921–2,411 ms |
+
+Across that workload, full-resolution pixel reads fell from 30 to 3, and exported color-map transfers fell from 40,960,000 to 10,240,000 bytes. Production bundle sizes total 864,126 bytes instead of 1,152,028 bytes (25% smaller). The final native 3MF was byte-identical before and after: SHA-256 `bb22c3d969bd9712b2aba9852c2d8c86d02af88ecdc1146d2dff7e0883fbcda7`.
+
+Run `npm run test:performance` for the measured workload and checks for source-pixel preservation, refreshed hour textures without geometry rebuilds, lightweight color transfers, and exports that retain their captured SVG during an import. On display-free Linux, build and run `npx electron --no-sandbox --ozone-platform=headless tests/performance.electron.cjs`. Optional `--report=/tmp/performance.json` and `--validation-output=/tmp/clock.3mf` save the measurements and sample print file. `--baseline` records the workload without asserting the new reuse behavior.
+
+Production builds minify all three browser bundles while preserving license notices. Use `node build.js --debug` to generate readable bundles when debugging, then `npm run build` to restore production assets.
+
 ## Projects and editing
 
 Name your project and use **Save project** to download a portable `.clock` file containing all settings, the original SVG, and its orientation. **Open project** restores it in the browser or Windows app, including on another device. This is an editable project backup, separate from STL/3MF print exports. Imported project files are limited to 12 MB, embedded SVGs to 5 MB. Invalid files leave the current design intact. Restored SVGs pass through the same sanitizer as direct imports, and local-save failures are shown honestly while the project remains usable for the session.
@@ -72,8 +93,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.13.0-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.13.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.14.0-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.14.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 

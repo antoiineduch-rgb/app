@@ -23,7 +23,7 @@ export function dominantArtworkColor(raster,fallback){
   return best?hex(sums.map(values=>values[mode]/best)):fallback;
 }
 
-export function filamentPaint(raster,baseColor,maxColors=4){
+export function filamentPaint(raster,baseColor,maxColors=4,{mips=true}={}){
   if(![2,4,8,16].includes(maxColors))throw Error('Choose 2, 4, 8, or 16 filaments.');
   if(typeof baseColor!=='string'||!/^#[0-9a-f]{6}$/i.test(baseColor))throw Error('Choose a valid back color.');
   const base=rgb(baseColor);
@@ -65,11 +65,12 @@ export function filamentPaint(raster,baseColor,maxColors=4){
   for(const sample of samples)lookup[sample.key]=nearest(sample.color,colors);
   const map=new Uint8Array(width*height);
   for(let i=0;i<map.length;i++)if(rgba[i*4+3]>=128)map[i]=lookup[bin(...composite(rgba,i*4,base,opaqueBins))];
-  return {palette,map,mips:paintMips(map,width),width};
+  return {palette,map,mips:mips?paintMips(map,width):null,width};
 }
 
 function paintMips(map,width){
-  const mips=[{width,data:Uint16Array.from(map,value=>1<<value)}];
+  const base=new Uint16Array(map.length);for(let i=0;i<map.length;i++)base[i]=1<<map[i];
+  const mips=[{width,data:base}];
   while(mips.at(-1).width>1){
     const previous=mips.at(-1),size=Math.ceil(previous.width/2),data=new Uint16Array(size*size);
     for(let y=0;y<size;y++)for(let x=0;x<size;x++){
@@ -80,12 +81,18 @@ function paintMips(map,width){
   }
   return mips;
 }
+export function restoredFilamentPaint(analysis,maxColors=4){
+  const {palette,map,width}=analysis||{};
+  if(!Number.isInteger(width)||width<2||width>2048||!(map instanceof Uint8Array)||map.length!==width*width||!Array.isArray(palette)||!palette.length||palette.length>maxColors||palette.some(color=>typeof color!=='string'||!/^#[0-9a-f]{6}$/i.test(color)))throw Error('The prepared filament map is invalid.');
+  for(const index of map)if(index>=palette.length)throw Error('The prepared filament map has an invalid color index.');
+  return {palette,map,width,mips:null};
+}
 
 export function recolorFilamentPaint(paint,overrides={}){
   const {palette,indices}=filamentColors(paint.palette,overrides);
-  if(!paint.map||indices.every((value,i)=>value===i))return {...paint,palette};
-  const map=paint.map.map(index=>indices[index]);
-  return {...paint,palette,map,mips:paintMips(map,paint.width)};
+  if(!paint.map)return {...paint,palette};
+  const unchanged=indices.every((value,i)=>value===i),map=unchanged?paint.map:paint.map.map(index=>indices[index]);
+  return {...paint,palette,map,mips:unchanged&&paint.mips?paint.mips:paintMips(map,paint.width)};
 }
 
 export function filamentCode(index){
@@ -114,20 +121,17 @@ export function paintFacet(points,frame,paint,budget={nodes:0}){
   if(!frame||frame.n!==paint.width||![frame.scale,frame.cx,frame.cy].every(Number.isFinite)||frame.scale<=0)throw Error('The SVG filament colors have an invalid placement.');
   const project=point=>[point[0]/frame.scale+frame.cx,frame.cy-(frame.flipY?-point[1]:point[1])/frame.scale];
   const sample=(x,y)=>paint.map[Math.max(0,Math.min(paint.width-1,Math.floor(y)))*paint.width+Math.max(0,Math.min(paint.width-1,Math.floor(x)))];
-  const midpoint=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
   // Quarter-millimeter paint precision; independent of the geometry sampling.
   const tolerance=.25/frame.scale;
-  function split(vertices,depth){
+  function split(a,b,c,depth){
     if(++budget.nodes>2000000)throw Error('The SVG color map is too complex. Choose fewer filaments or simplify its smallest details.');
-    const centroid=[0,1].map(k=>(vertices[0][k]+vertices[1][k]+vertices[2][k])/3),color=sample(...centroid);
-    const bounds=[0,1].map(k=>[Math.floor(Math.min(...vertices.map(p=>p[k]))),Math.floor(Math.max(...vertices.map(p=>p[k])))]);
-    const lengths=vertices.map((a,i)=>{const b=vertices[(i+1)%3];return (a[0]-b[0])**2+(a[1]-b[1])**2;});
-    const longest=Math.max(...lengths);
-    if(longest<=tolerance*tolerance||depth>=20||uniformRectangle(paint,bounds[0][0],bounds[1][0],bounds[0][1],bounds[1][1],1<<color))return {code:filamentCode(color),color};
-    const special=(lengths.indexOf(longest)+2)%3,[a,b,c]=[0,1,2].map(i=>vertices[(special+i)%3]),middle=midpoint(b,c);
-    const left=split([a,b,middle],depth+1),right=split([middle,c,a],depth+1);
+    const color=sample((a[0]+b[0]+c[0])/3,(a[1]+b[1]+c[1])/3),ab=(a[0]-b[0])**2+(a[1]-b[1])**2,bc=(b[0]-c[0])**2+(b[1]-c[1])**2,ca=(c[0]-a[0])**2+(c[1]-a[1])**2,longest=Math.max(ab,bc,ca);
+    if(longest<=tolerance*tolerance||depth>=20||uniformRectangle(paint,Math.floor(Math.min(a[0],b[0],c[0])),Math.floor(Math.min(a[1],b[1],c[1])),Math.floor(Math.max(a[0],b[0],c[0])),Math.floor(Math.max(a[1],b[1],c[1])),1<<color))return {code:filamentCode(color),color};
+    const special=((ab===longest?0:bc===longest?1:2)+2)%3;
+    if(special===1)[a,b,c]=[b,c,a];else if(special===2)[a,b,c]=[c,a,b];
+    const middle=[(b[0]+c[0])/2,(b[1]+c[1])/2],left=split(a,b,middle,depth+1),right=split(middle,c,a,depth+1);
     if(left.color>=0&&left.color===right.color)return left;
     return {code:left.code+right.code+(special*4+1).toString(16).toUpperCase(),color:-1};
   }
-  return split(points.map(project),0).code;
+  return split(project(points[0]),project(points[1]),project(points[2]),0).code;
 }

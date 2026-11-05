@@ -16,7 +16,7 @@ function analyze(painting,settings,workerURL,signal){
       fallbackTimer=setTimeout(()=>{try{
         signal.throwIfAborted();
         const base=settings.bambuBackColor==='background'?dominantArtworkColor(painting,settings.faceColor):settings.faceColor;
-        const {palette,map,width}=filamentPaint(painting,base,settings.filamentCount);finish(null,{palette,map,width});
+        const {palette,map,width}=filamentPaint(painting,base,settings.filamentCount,{mips:false});finish(null,{palette,map,width});
       }catch(error){finish(error);}},0);
     };
     signal.addEventListener('abort',abort,{once:true});if(signal.aborted){abort();return;}
@@ -46,7 +46,12 @@ export class FilamentPreview{
     this.reset.onclick=onReset;this.retry.onclick=()=>{this.cached=null;this.update(this.current);};
   }
   cancel(){clearTimeout(this.timer);this.controller?.abort();this.controller=null;this.jobKey=null;}
-  dispose(){this.cancel();this.cached=null;this.textureCache=null;}
+  clear(){this.cancel();this.cached=null;this.textureCache=null;}
+  dispose(){this.clear();}
+  analysisFor(key){
+    if(this.cached?.key!==key)return null;
+    const {palette,map,width}=this.cached.paint;return {palette,map,width};
+  }
   meshColors(){
     if(this.mode!=='print'||!this.current?.enabled||this.current.busy||this.cached?.key!==this.current.key)return null;
     const {paint}=this.cached,mapped=filamentColors(paint.palette,this.current.overrides),key=JSON.stringify([this.cached.key,mapped.colors]);

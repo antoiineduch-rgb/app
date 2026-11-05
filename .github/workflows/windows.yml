@@ -70,6 +70,9 @@ jobs:
       - name: Test integrated desk stands and upright inspection
         run: npm run test:desk-stand
 
+      - name: Test artwork caching, lightweight exports, and unchanged print files
+        run: npm run test:performance
+
       - name: Build Windows installer
         run: npm run dist:win
 
