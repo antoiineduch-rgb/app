@@ -73,6 +73,10 @@ Under **Clock mechanism & thickness**, enable **Rear desk stand** to add a fixed
 
 A stand always prints with the front flat on the bed, and pauses raised front artwork and hours. Colors and numbers remain available in color 3MF. Your previous front-relief preference returns when the stand is switched off. A 3 mm face with the default stand is 48 mm high as printed; backing adds its selected thickness. The support is one piece with the clock, with no separate download or assembly. Test balance with the real movement and hands fitted; irregular artwork and added hardware can change the center of mass.
 
+Stand placement reserves the movement body even with **Rear mechanism mount** switched off. Earlier versions could place the support inside an unprinted movement on small clocks or short SVGs. **Movement width**, **Movement height**, **Movement depth** and the fit allowance remain available whenever a stand is enabled. Measure the complete movement, including its battery compartment. **Extra space below movement** adds 4 mm by default and accepts 2–20 mm; increase it for access to controls or an off-center shaft. Printed box walls are included in the reserved envelope when a box is enabled. Adjusting movement height or the gap relocates the attachment while retaining the selected rear foot contacts. A design without enough solid space offers a backing or dimension adjustments.
+
+Enabling the stand opens the upright **Desk** inspection automatically. **Show mechanism space** draws a blue outline of the reserved movement and clearance. This is an inspection guide and is absent from STL and both 3MF formats. Width/depth guide changes and hiding the guide reuse the print mesh; movement height and gap changes rebuild the affected stand. The gap supports undo, project backups and reopening; older projects receive the 4 mm default. Re-export older stand files to obtain the corrected placement.
+
 Use **See it standing** or **Print mesh → Desk** to inspect the clock upright at its selected lean, with the foot on the desk surface. The Desk pose changes inspection only; downloads remain front-down for printing. Front/Angle/Back restore the print orientation. Stand settings support undo, project backups, and local restoration, and stay off in older projects. The A1 quick setup preserves an enabled stand and its dimensions.
 
 Choose **Recessed pocket · cuts into the face** to retain the earlier recessed option. The adjustable preset is a 55 × 55 mm body, 5.5 mm depth, and 0.5 mm clearance on each side, making a 56 × 56 mm opening. Width and height are independent; measure your movement before printing. The shaft hole remains separately adjustable. Enabling the pocket increases the face to 7 mm, or an enabled SVG backing to 6.8 mm, when needed to leave at least 1.2 mm of material in front. Existing greater thickness is retained. The pocket also requires at least 1.2 mm of surrounding material and is rejected if it intersects missing artwork. A thick round backing can provide the missing support.
@@ -97,8 +101,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.15.0-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.15.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.16.0-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.16.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
@@ -162,7 +166,7 @@ Run `npm run test:svg-backing` for a genuinely disconnected SVG, one-click repai
 
 Run `npm run test:hole-fit` for actual fit-strip downloads, applying a tested opening to a real clock 3MF, preserving the original printed strip on repeat downloads, undo and project restoration, worker fallback, cancellation without late downloads, mobile touch targets, and native desktop Save As. Unit tests generate and independently check closed meshes across all 101 supported center-hole values.
 
-Run `npm run test:desk-stand` for actual integrated stands on all six presets, adjusted dimensions and mechanism clearance, closed STL and matching 3MF geometry, original SVG colors, unsuitable-attachment repair, upright WebGL inspection with unchanged downloads, undo, projects, reopening, and mobile controls. Unit tests also check desk contacts, a model-only center of mass inside its support triangle, open shaft and movement passages, tapered surfaces and low material volume. On display-free Linux use the same software WebGL flags as `test:studio`.
+Run `npm run test:desk-stand` for actual integrated stands on all six presets, adjusted dimensions and mechanism clearance, closed STL and matching 3MF geometry, original SVG colors, unsuitable-attachment repair, upright WebGL inspection with unchanged downloads, undo, projects, reopening, and mobile controls. It also checks the reproduced 100 mm clock/movement collision without a printed box, movement-height and gap invalidation, guide-only updates without rebuilds, and guide exclusion from print files. Unit tests check desk contacts, a model-only center of mass inside its support triangle, open shaft and movement passages, tapered surfaces and low material volume. On display-free Linux use the same software WebGL flags as `test:studio`.
 
 Run `npm run test:guided-studio` for the A1 setup with one-step undo and preservation of artwork, orientation, backing, size and spools; actual filament-colored WebGL pixels matching exported 3MF palettes; color changes without geometry rebuilds; automatic hour contrast; direct print-review repairs; stale-check protection; and mobile controls. It uses the same headless software WebGL flags as `test:studio`.
 

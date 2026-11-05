@@ -1,9 +1,7 @@
 import clipping from 'polygon-clipping';
 import {artworkSurfaceHeight} from './svg-details.js';
-import {withMechanismRecess,recessDimensions} from './mechanism-recess.js';
-import {boxDimensions} from './mechanism-box.js';
-import {raisedMechanismBox} from './artwork-surface.js';
-import {standDimensions,standPose} from './stand-settings.js';
+import {withMechanismRecess} from './mechanism-recess.js';
+import {standDimensions,standPose,standMovementSpace} from './stand-settings.js';
 
 const snap=value=>Math.round(value*1e6)/1e6;
 const turnOver=polygons=>polygons.map(p=>p.map(r=>r.map(([x,y])=>[x,-y]).reverse()));
@@ -36,9 +34,8 @@ export function standLayout(layers,settings){
   const center=plateCenter(foundation),contacts=foundation.flatMap(p=>p[0].filter(point=>point[1]>=maxY-.01).map(point=>point[0])),frontX=(Math.min(...contacts)+Math.max(...contacts))/2,angle=dimensions.lean*Math.PI/180;
   const centerDepth=-(center[1]+bottom)*Math.sin(angle)-face/2*Math.cos(angle),fraction=Math.max(.1,Math.min(.9,centerDepth/(dimensions.depth/Math.cos(angle))));
   const centerX=(center[0]-(1-fraction)*frontX)/fraction;
-  let limit=-settings.hole/2-2;
-  if(settings.mechanismRecess){const movementHeight=raisedMechanismBox(settings)?boxDimensions(settings).outerHeight:recessDimensions(settings).height;limit=Math.min(limit,-movementHeight/2-2);}
-  if(limit-low<dimensions.rib*2+1.2)throw Error('Desk stand: there is not enough space below the mechanism. Use a round backing, reduce stand depth or lean, or increase clock size.');
+  const movement=standMovementSpace(settings),limit=Math.min(-settings.hole/2-2,-movement.bottom);
+  if(limit-low<dimensions.rib*2+1.2)throw Error('Desk stand: there is not enough space below the mechanism. Use a round backing, reduce stand depth, lean or extra clearance, or increase clock size.');
   // Find solid attachment material on scalloped or rounded faces. The lower
   // wall can grow outward at at most 37° from vertical when printed face-down.
   for(let offset=0;offset<=dimensions.depth*.75;offset+=.5){

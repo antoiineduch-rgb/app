@@ -1,7 +1,7 @@
-import { Scene,Color,PerspectiveCamera,WebGLRenderer,BufferAttribute,BufferGeometry,Mesh,MeshStandardMaterial,HemisphereLight,DirectionalLight,LineSegments,LineBasicMaterial,PlaneGeometry,Texture,DataTexture,RGBAFormat,SRGBColorSpace,DoubleSide,Vector3,ACESFilmicToneMapping,PCFSoftShadowMap } from 'three';
+import { Scene,Color,PerspectiveCamera,WebGLRenderer,BufferAttribute,BufferGeometry,BoxGeometry,EdgesGeometry,Mesh,MeshStandardMaterial,HemisphereLight,DirectionalLight,LineSegments,LineBasicMaterial,PlaneGeometry,Texture,DataTexture,RGBAFormat,SRGBColorSpace,DoubleSide,Vector3,ACESFilmicToneMapping,PCFSoftShadowMap } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {artworkPixel,paintedTriangle,flatFrontOnBed} from './artwork-surface.js';
-import {standPose} from './stand-settings.js';
+import {standPose,standMovementSpace} from './stand-settings.js';
 import {artworkSurfaceHeight} from './svg-details.js';
 
 // Loaded only when the user requests print inspection. Render on interaction,
@@ -71,6 +71,7 @@ export class PrintView{
       finally{URL.revokeObjectURL(url);}
     }
     if(sequence!==this.sequence||signal?.aborted){geometry.dispose();base.dispose();painted.dispose();map?.dispose();signal?.throwIfAborted();return;}
+    this.clearMovementSpace();
     if(this.model){this.scene.remove(this.model);this.model.geometry.dispose();for(const material of this.model.material)material.dispose();this.texture?.dispose();}
     this.texture=map;this.model=new Mesh(geometry,[base,painted]);this.model.castShadow=true;this.model.receiveShadow=false;this.scene.add(this.model);this.renderer.shadowMap.needsUpdate=true;this.appearanceKey=null;
     this.span=Math.max(...result.stats.dimensions.slice(0,2));this.controls.minDistance=this.span*.35*(this.fitScale||1);this.controls.maxDistance=this.span*6*(this.fitScale||1);
@@ -87,6 +88,21 @@ export class PrintView{
     }
     if(sequence!==this.textureSequence||this.model!==model||signal?.aborted){map?.dispose();signal?.throwIfAborted();return;}
     this.texture?.dispose();this.texture=map;this.appearanceKey=null;this.setAppearance(this.color,this.colored,this.wireframe);
+  }
+  clearMovementSpace(){
+    if(this.movementGuide){this.model?.remove(this.movementGuide);this.movementGuide.geometry.dispose();this.movementGuide.material.dispose();this.movementGuide=null;}
+    this.movementGuideKey=null;this.canvas.dataset.movementSpace='';
+  }
+  setMovementSpace(settings,visible){
+    const space=settings.deskStand&&visible&&this.model?standMovementSpace(settings):null,face=artworkSurfaceHeight(settings),key=space?JSON.stringify([space,face,settings.mechanismRecess,settings.mechanismMount]):null;
+    if(key===this.movementGuideKey)return;this.clearMovementSpace();this.movementGuideKey=key;
+    if(space){
+      const box=new BoxGeometry(space.width,space.guideHeight,space.depth),edges=new EdgesGeometry(box);box.dispose();
+      this.movementGuide=new LineSegments(edges,new LineBasicMaterial({color:'#4b80b9',transparent:true,opacity:.9,depthWrite:false}));
+      const base=settings.mechanismRecess&&settings.mechanismMount!=='box'?Math.max(0,face-space.depth):face;
+      this.movementGuide.position.set(0,space.centerY,base+space.depth/2);this.model.add(this.movementGuide);this.canvas.dataset.movementSpace=key;
+    }
+    this.render();
   }
   setAppearance(color,colored=this.colored,wireframe=this.wireframe){
     this.color=color;this.colored=colored;this.wireframe=wireframe;if(!this.model)return;
@@ -133,5 +149,5 @@ export class PrintView{
   }
   zoom(factor){const offset=this.camera.position.clone().sub(this.controls.target);offset.setLength(Math.max(this.controls.minDistance,Math.min(this.controls.maxDistance,offset.length()*factor)));this.camera.position.copy(this.controls.target).add(offset);this.controls.update();this.render();}
   orbit(horizontal,vertical){this.controls.rotateLeft(horizontal);this.controls.rotateUp(vertical);this.controls.update();}
-  dispose(){this.sequence++;this.textureSequence=(this.textureSequence||0)+1;if(this.frame!==null)cancelAnimationFrame(this.frame);this.observer.disconnect();this.controls.dispose();if(this.model){this.model.geometry.dispose();for(const material of this.model.material)material.dispose();}for(const object of this.bed||[]){object.geometry.dispose();object.material.dispose();}this.texture?.dispose();this.filamentTexture?.dispose();this.keyLight.shadow.map?.dispose();this.renderer.dispose();this.canvas.remove();}
+  dispose(){this.sequence++;this.textureSequence=(this.textureSequence||0)+1;if(this.frame!==null)cancelAnimationFrame(this.frame);this.observer.disconnect();this.controls.dispose();this.clearMovementSpace();if(this.model){this.model.geometry.dispose();for(const material of this.model.material)material.dispose();}for(const object of this.bed||[]){object.geometry.dispose();object.material.dispose();}this.texture?.dispose();this.filamentTexture?.dispose();this.keyLight.shadow.map?.dispose();this.renderer.dispose();this.canvas.remove();}
 }

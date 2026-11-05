@@ -53,7 +53,7 @@ let previewMode='design',meshView=null,loadedMeshKey=null,meshPreviewKey=null,me
 let bed={width:220,depth:220},bedPreset='custom';
 try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500)){bed={width:saved.width,depth:saved.depth};if(saved.preset==='a1'&&saved.width===256&&saved.depth===256)bedPreset='a1';}}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
-function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,flatFrontOnBed(settings)?'flat':[settings.svgDetail,settings.svgRelief,settings.svgTone],settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)||flatFrontOnBed(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.mechanismMount,settings.mechanismFlatFront,settings.mechanismWall,settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false,settings.deskStand?[settings.standWidth,settings.standDepth,settings.standLean]:false]);}
+function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,flatFrontOnBed(settings)?'flat':[settings.svgDetail,settings.svgRelief,settings.svgTone],settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)||flatFrontOnBed(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.mechanismMount,settings.mechanismFlatFront,settings.mechanismWall,settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false,settings.deskStand?[settings.standWidth,settings.standDepth,settings.standLean,settings.standClearance,settings.recessHeight,settings.recessClearance]:false]);}
 function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[paintKey({settings:{...settings,faceColor:colors[settings.color][1]},revision:customRevision,placement:artworkOrientation}),settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor,Object.entries(settings.bambuColors).sort()]:null]:null]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
 function updateSaveLabel(){
@@ -154,23 +154,25 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   if(forceInputs||document.activeElement!==$('projectName'))$('projectName').value=state.projectName;
   $('showHands').checked=state.showHands;const hands=$('clockSvg').querySelector('#previewHands');if(hands)hands.toggleAttribute('hidden',!state.showHands);
   $('mechanismQuickSummary').textContent=raisedMechanismBox(state)?`${state.recessWidth} × ${state.recessHeight} mm movement · ${state.recessDepth} mm box · ${Number(artworkSurfaceHeight(state).toFixed(1))} mm face`:state.mechanismRecess?`${state.recessWidth} × ${state.recessHeight} mm pocket · ${state.recessDepth} mm deep`:`${state.hole.toFixed(1)} mm center hole · optional rear box`;
+  if(state.deskStand&&!state.mechanismRecess)$('mechanismQuickSummary').textContent=`${state.recessWidth} × ${state.recessHeight} mm movement · ${state.recessDepth} mm deep · ${state.hole.toFixed(1)} mm shaft hole`;
   if(state.deskStand)$('mechanismQuickSummary').textContent+=` · ${state.standLean}° desk stand`;
-  $('mechanismRecess').checked=state.mechanismRecess;$('recessOptions').hidden=!state.mechanismRecess;
+  $('mechanismRecess').checked=state.mechanismRecess;$('recessOptions').hidden=!(state.mechanismRecess||state.deskStand);$('mountTypeControl').hidden=!state.mechanismRecess;
   $('mechanismMount').value=state.mechanismMount;$('mechanismFlatFront').checked=state.deskStand||state.mechanismFlatFront;$('mechanismFlatFront').disabled=state.deskStand;
   const box=state.mechanismMount==='box';
-  for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean'])if(forceInputs||(document.activeElement!==$(id)&&!$(id).dataset.editing)){$(id).value=state[id];if(forceInputs)delete $(id).dataset.editing;}
-  $('boxWallControl').hidden=!box;$('flatFrontControl').hidden=$('flatFrontHelp').hidden=!(raisedMechanismBox(state)||state.deskStand);
+  for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean','standClearance'])if(forceInputs||(document.activeElement!==$(id)&&!$(id).dataset.editing)){$(id).value=state[id];if(forceInputs)delete $(id).dataset.editing;}
+  $('boxWallControl').hidden=!state.mechanismRecess||!box;$('flatFrontControl').hidden=$('flatFrontHelp').hidden=!(raisedMechanismBox(state)||state.deskStand);
   $('flatFrontHelp').textContent=state.mechanismFlatFront?'Keeps SVG colors and numbers flat in color 3MF. Raised front details are paused; STL contains the shape and box only.':'Raised front details are retained. Turn this on for a flat front against the print bed, with flat color artwork and numbers.';
   if(state.deskStand)$('flatFrontHelp').textContent='The stand prints with a flat front. SVG artwork and numbers use flat color in 3MF. Turn off the stand to restore your front-relief preference.';
-  $('recessDepthLabel').textContent=box?'Box height · mm':'Pocket depth · mm';
-  $('mountHelp').textContent=box?'Adds four walls on the back, open at the top. The clock face stays at your chosen thickness.':'Cuts a pocket into the back. Enabling it thickens the face or backing enough to retain 1.2 mm of front material.';
+  $('recessDepthLabel').textContent=!state.mechanismRecess?'Movement depth · mm':box?'Box height · mm':'Pocket depth · mm';
+  $('mountHelp').textContent=!state.mechanismRecess?'Match your movement body. The stand reserves this space even when you do not print a rear mount.':box?'Adds four walls on the back, open at the top. The clock face stays at your chosen thickness.':'Cuts a pocket into the back. Enabling it thickens the face or backing enough to retain 1.2 mm of front material.';
   const pocket=box?boxDimensions(state):recessDimensions(state),mm=value=>Number(value.toFixed(2));
   $('recessSummary').textContent=box?`Box: ${mm(pocket.width)} × ${mm(pocket.height)} mm inside · ${pocket.depth} mm high · ${pocket.wall} mm walls. Outside: ${mm(pocket.outerWidth)} × ${mm(pocket.outerHeight)} mm. Verify your movement dimensions before printing.`:`Pocket: ${pocket.width} × ${pocket.height} mm · ${pocket.depth} mm deep. Keeps at least ${RECESS_SKIN} mm of front material. Verify your movement dimensions before printing.`;
+  if(!state.mechanismRecess)$('recessSummary').textContent=`Movement: ${state.recessWidth} × ${state.recessHeight} × ${state.recessDepth} mm · ${state.recessClearance} mm fit allowance per side.`;
   $('mountPrintHelp').textContent=state.deskStand?'Use Print mesh → Desk to inspect the movement and stand. The print file stays front-down.':flat?'Use Print mesh → Back to inspect the open box. Export is already front-down with the walls pointing up.':box?'Use Print mesh → Back to inspect the box. Raised front details need a suitable print orientation and may need supports.':'Use Print mesh → Back to inspect it. The rear pocket may need supports; check orientation and bridging in your slicer.';
   $('supportBadge').textContent=flat?'Flat front · box walls up':state.mechanismRecess?(box?'Rear box · check supports':'Rear pocket · check supports'):'No supports needed';
   $('printabilitySummary').textContent=flat?'✓ Flat front on bed · open box grows upward':state.mechanismRecess?'Mechanism mount · review orientation and supports':'✓ Flat back · no supports needed';
   $('deskStand').checked=state.deskStand;$('standOptions').hidden=!state.deskStand;
-  const stand=standDimensions(state);$('standSummary').textContent=`${stand.width} mm wide · ${stand.depth} mm behind the face · ${stand.lean}° backward lean. The support stays below the mechanism and is included in STL and 3MF.`;
+  const stand=standDimensions(state);$('standSummary').textContent=`${stand.width} mm wide · ${stand.depth} mm behind the face · ${stand.lean}° backward lean. Leaves at least ${stand.clearance} mm below the movement body. The support is included in STL and 3MF.`;
   if(state.deskStand){$('supportBadge').textContent='Flat front · rear desk stand';$('printabilitySummary').textContent='✓ Flat front on bed · rear stand grows upward';}
   if(meshCameraView==='desk'&&!state.deskStand)meshCameraView='angle';$('deskView').hidden=previewMode!=='print'||!state.deskStand;
   updateArtworkUI();validateDimensions();persist();
@@ -223,7 +225,8 @@ designs.forEach(d=>{const b=document.createElement('button');b.className='design
 colors.forEach(([name,color],i)=>{const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=name;b.setAttribute('aria-label',name);b.onclick=()=>{state.color=i;render();};$('swatches').append(b);});
 document.querySelectorAll('[data-texture]').forEach(b=>b.onclick=()=>{state.texture=b.dataset.texture;render();});
 const mountFields=()=>['recessWidth','recessHeight','recessDepth','recessClearance',...(state.mechanismMount==='box'?['mechanismWall']:[])];
-const accessoryFields=()=>[...(state.mechanismRecess?mountFields():[]),...(state.deskStand?['standWidth','standDepth','standLean']:[])];
+const movementFields=['recessWidth','recessHeight','recessDepth','recessClearance'];
+const accessoryFields=()=>[...(state.mechanismRecess?mountFields():state.deskStand?movementFields:[]),...(state.deskStand?['standWidth','standDepth','standLean','standClearance']:[])];
 function validateDimensions(focus=false){
   const ids=['diameterNumber','thickness','hole',...accessoryFields()],invalid=ids.map($).find(input=>input.value===''||!input.validity.valid);
   for(const id of ids)$(id).setAttribute('aria-invalid',String($(id).value===''||!$(id).validity.valid));
@@ -231,7 +234,7 @@ function validateDimensions(focus=false){
   if(invalid){
     const size=invalid.id==='diameterNumber';
     if(invalid.id.startsWith('stand')){$('standError').hidden=false;$('standError').textContent='Desk stand: use the displayed measurement ranges and steps.';}
-    else if(mountFields().includes(invalid.id)){$('recessError').hidden=false;$('recessError').textContent='Mechanism mount: enter dimensions within the displayed ranges and steps.';}
+    else if(mountFields().includes(invalid.id)){$('recessError').hidden=false;$('recessError').textContent='Movement: enter dimensions within the displayed ranges and steps.';}
     else $(size?'sizeError':'dimensionError').textContent=size?'Enter a diameter from 100 to 300 mm, in steps of 1 mm.':invalid.id==='hole'?'Enter a center hole from 5 to 15 mm, in steps of 0.1 mm.':'Enter a face thickness from 2 to 10 mm, in steps of 0.5 mm.';
     if(focus){if(!size)document.querySelector('.advanced-settings').open=true;invalid.focus();}
   }
@@ -264,14 +267,15 @@ $('inspectStand').onclick=()=>{if(!state.deskStand||importPending||restorePendin
     if(id==='diameter'){delete $('diameterNumber').dataset.editing;$('diameterNumber').value=state.diameter;}
   }
   validateDimensions();render({historyGroup:['markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)?null:id});
+  if(id==='deskStand'&&state.deskStand){setPreviewMode('print');meshCamera('desk');}
 }));
-for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean'])$(id).addEventListener('input',()=>{
+for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean','standClearance'])$(id).addEventListener('input',()=>{
   $(id).dataset.editing='true';
   $(id).setAttribute('aria-invalid',String($(id).value===''||!$(id).validity.valid));
   if($(id).value===''||!$(id).validity.valid){validateDimensions();return;}
   state[id]=Number($(id).value);if(id==='recessDepth')makeRecessRoom();render({historyGroup:id});
 });
-for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean'])$(id).addEventListener('blur',()=>{if($(id).value!==''&&$(id).validity.valid){delete $(id).dataset.editing;$(id).value=state[id];}});
+for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean','standClearance'])$(id).addEventListener('blur',()=>{if($(id).value!==''&&$(id).validity.valid){delete $(id).dataset.editing;$(id).value=state[id];}});
 for(const id of ['hourStyle','hourColor','exportFormat','svgDetail','svgTone','threeMFTarget','filamentCount','bambuBackColor','mechanismMount'])$(id).addEventListener('change',()=>{
   const value=id==='filamentCount'?Number($(id).value):$(id).value,allowed={hourStyle:['ticks','arabic','roman'],hourColor:['light','dark','auto'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light'],threeMFTarget:['bambu-a1','standard'],filamentCount:[2,4],bambuBackColor:['background','face'],mechanismMount:['box','recess']}[id];
   if(!allowed.includes(value))return;state[id]=value;if(id==='mechanismMount')makeRecessRoom();render();
@@ -316,7 +320,7 @@ $('applyClockSetup').onclick=()=>{
   history.endGroup();state=flatColorClock(state);setBuildPlate(256,256,'a1');render({forceInputs:true});history.endGroup();
   toast('A1 color setup applied: flat front, 55 mm rear box and 12 fitted numbers.');
 };
-$('editMechanism').onclick=()=>{document.querySelector('.advanced-settings').open=true;$('mechanismRecess').scrollIntoView({behavior:'smooth',block:'center'});$('mechanismRecess').focus({preventScroll:true});};
+$('editMechanism').onclick=()=>{document.querySelector('.advanced-settings').open=true;const target=$(state.deskStand&&!state.mechanismRecess?'recessHeight':'mechanismRecess');target.scrollIntoView({behavior:'smooth',block:'center'});target.focus({preventScroll:true});};
 $('downloadAgain').onclick=()=>$('export').click();
 for(const id of ['thickness','hole'])$(id).addEventListener('blur',()=>{if(validateDimensions()){delete $(id).dataset.editing;$(id).value=state[id];}});
 function tab(upload){$('uploadPanel').hidden=!upload;$('presetPanel').hidden=upload;for(const [id,active]of[['uploadTab',upload],['presetsTab',!upload]]){$(id).classList.toggle('selected',active);$(id).setAttribute('aria-selected',active);$(id).tabIndex=active?0:-1;}}
@@ -661,8 +665,8 @@ function updatePrintSummary(){
   $('printCheckStatus').textContent=stats?(stats.components>1?`${stats.components} separate pieces. Plan a backing or assembly before printing.`:'Closed print mesh checked. Add the movement and hands after printing.'):'Check the model to see its exact dimensions, relief, and separate parts.';
   $('printCheckStatus').dataset.tone=stats?(stats.components>1?'warning':'success'):'neutral';
   $('printCheckStatus').dataset.checked=String(!!stats);
-  const invalidPocket=state.mechanismRecess&&mountFields().some(id=>$(id).value===''||!$(id).validity.valid);
-  const pocketError=invalidPocket?'Mechanism mount: enter dimensions within the displayed ranges and steps.':state.mechanismRecess&&lastGeometryError?.key===key&&/^Rear (pocket|box):/.test(lastGeometryError.message)?lastGeometryError.message:null;
+  const invalidPocket=(state.mechanismRecess||state.deskStand)&&(state.mechanismRecess?mountFields():movementFields).some(id=>$(id).value===''||!$(id).validity.valid);
+  const pocketError=invalidPocket?'Movement: enter dimensions within the displayed ranges and steps.':state.mechanismRecess&&lastGeometryError?.key===key&&/^Rear (pocket|box):/.test(lastGeometryError.message)?lastGeometryError.message:null;
   $('recessError').hidden=!pocketError;$('recessError').textContent=pocketError||'';
   $('backingForRecess').hidden=!state.mechanismRecess||state.design!=='custom'||(state.svgBacking&&(raisedMechanismBox(state)||state.svgBackingThickness>=state.recessDepth+RECESS_SKIN));
   $('backingForRecess').textContent=raisedMechanismBox(state)?'Use a round backing under the box':'Use a thick round backing for the pocket';
@@ -678,7 +682,7 @@ function updatePrintSummary(){
   $('fitToBed').hidden=!valid||!fit||fit.fits;
   $('connectArtwork').hidden=state.design!=='custom'||state.svgBacking||!stats||stats.components<2;$('connectArtwork').disabled=!!checkController||importPending||restorePending||deletingArtwork;
   holeFit.update();
-  const standError=state.deskStand&&['standWidth','standDepth','standLean'].some(id=>$(id).value===''||!$(id).validity.valid)?'Desk stand: use the displayed measurement ranges and steps.':state.deskStand&&lastGeometryError?.key===key&&lastGeometryError.message.startsWith('Desk stand:')?lastGeometryError.message:null;
+  const standError=state.deskStand&&['standWidth','standDepth','standLean','standClearance'].some(id=>$(id).value===''||!$(id).validity.valid)?'Desk stand: use the displayed measurement ranges and steps.':state.deskStand&&lastGeometryError?.key===key&&lastGeometryError.message.startsWith('Desk stand:')?lastGeometryError.message:null;
   $('standError').hidden=!standError;$('standError').textContent=standError||'';$('backingForStand').hidden=!state.deskStand||state.design!=='custom'||state.svgBacking;
   if(meshView)meshView.setBed(bed.width,bed.depth,fit?.fits!==false,$('meshBed').checked);
   updateReadiness();
@@ -732,6 +736,7 @@ function setPreviewMode(mode){
   $('backView').hidden=mode!=='print';$('deskView').hidden=mode!=='print'||!state.deskStand;if(mode==='print')meshCamera(meshCameraView);else{$('backView').classList.remove('selected');$('deskView').classList.remove('selected');view();}
   if(mode==='design'){clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=null;$('meshCanvas').hidden=$('meshState').hidden=true;meshView?.setVisible(false);}
   else scheduleMeshPreview(true);
+  updateMeshAppearance();
 }
 function inspectionKey(snapshot=designSnapshot()){return JSON.stringify([snapshot.geometry,originalArtwork(snapshot.settings)||flatFrontOnBed(snapshot.settings)?paintKey(snapshot):null]);}
 function scheduleMeshPreview(immediate=false){
@@ -764,11 +769,15 @@ function scheduleMeshPreview(immediate=false){
 $('designPreview').onclick=()=>setPreviewMode('design');$('printPreview').onclick=()=>setPreviewMode('print');
 $('meshRetry').onclick=()=>{loadedMeshKey=loadedTextureKey=meshPreviewKey=null;scheduleMeshPreview(true);};
 function updateMeshAppearance(){
+  const showMovement=state.deskStand&&$('movementGuide').checked,guideShown=showMovement&&previewMode==='print';
+  $('previewWorkspaceHint').textContent=guideShown?'Blue outline: mechanism space · not printed':'Take a closer look at your clock';
+  $('expandedPreviewDescription').textContent=guideShown?'The blue outline reserves mechanism space. It is not included in print files.':'Your current design and print mesh, with more room to inspect.';
   if(!meshView||loadedMeshKey!==geometryKey())return;
+  meshView.setMovementSpace(state,showMovement);
   const proof=filamentPreview.meshColors();meshView.setFilaments(proof);meshView.setAppearance(colors[state.color][1],$('meshColors').checked,$('meshWireframe').checked);
   $('meshColorLabel').textContent=proof?'Print colors':'SVG colors';
 }
-for(const id of ['meshColors','meshWireframe'])$(id).onchange=updateMeshAppearance;
+for(const id of ['meshColors','meshWireframe','movementGuide'])$(id).onchange=updateMeshAppearance;
 $('meshBed').onchange=updatePrintSummary;
 $('openProject').onclick=()=>$('projectUpload').click();
 $('saveProject').onclick=()=>{

@@ -29,6 +29,25 @@ test('the stand clears raised boxes and keeps recessed mechanism openings intact
     const inside=surfaces(faces,15,3);assert.ok(inside.every(z=>Math.abs(z)<.0001||Math.abs(z-(mechanismMount==='box'?3:1.5))<.0001),'the stand does not fill the mechanism opening');assert.deepEqual(surfaces(faces,0,0),[]);
   }
 });
+test('a stand leaves room for the real movement even when no rear box is printed',()=>{
+  const {n,alpha}=circle(),settings={...defaults,diameter:100,standWidth:45,standDepth:25,mechanismRecess:false,recessWidth:55,recessHeight:55,recessDepth:5.5,recessClearance:.5,standClearance:4};
+  const buffer=makeClockSTL(alpha,n,settings),faces=[...binarySTLTriangles(buffer)];closed(faces);
+  // This point is inside the 55 mm movement, near its lower corner. It must
+  // contain only the plate, with empty space above for the movement body.
+  assert.ok(Math.max(...surfaces(faces,20,22))<=3.0001,'the rear support must not enter the unprinted movement body');
+  const rear=faces.flat().filter(p=>p[2]>3.0001);assert.ok(rear.every(p=>p[1]>=32-.0001),'the support remains below the movement plus its fit allowance and 4 mm gap');
+});
+test('movement height and the extra gap relocate the attachment while keeping both feet on the desk',()=>{
+  const {n,alpha}=circle(),base={...defaults,diameter:100,standDepth:25,recessWidth:55,recessHeight:55,recessClearance:.5};
+  const buffers=[];
+  for(const patch of [{standClearance:2},{standClearance:8},{recessHeight:61,standClearance:4}]){
+    const settings={...base,...patch},buffer=makeClockSTL(alpha,n,settings),faces=[...binarySTLTriangles(buffer)],stats=analyzeSTL(buffer);closed(faces);buffers.push(buffer);
+    const bottom=(settings.recessHeight+1)/2+settings.standClearance;assert.ok(Math.max(...surfaces(faces,20,bottom-.5))<=3.0001,'the volume reserved for the movement and gap stays empty');
+    const pose=standPose(settings,-stats.max[1],3),foot=faces.flat().filter(p=>Math.abs(p[2]-28)<1e-5).map(p=>posePoint(p,pose));assert.ok(foot.some(p=>Math.abs(p[2])<.0001&&p[0]<-22)&&foot.some(p=>Math.abs(p[2])<.0001&&p[0]>22));
+    assert.equal(stats.components,1);assert.equal(stats.max[2],28);
+  }
+  assert.notDeepEqual(new Uint8Array(buffers[0]),new Uint8Array(buffers[1]));assert.notDeepEqual(new Uint8Array(buffers[1]),new Uint8Array(buffers[2]));
+});
 test('width, depth and lean change the real support and unsuitable attachments fail clearly',()=>{
   const {n,alpha}=circle();
   for(const settings of [{...defaults,standWidth:60,standDepth:60,standLean:18},{...defaults,diameter:100,standWidth:25,standDepth:25,standLean:6}]){

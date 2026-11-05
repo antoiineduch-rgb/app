@@ -74,7 +74,7 @@ test('hour contrast travels with projects while earlier designs retain their lig
   legacy.settings.hourColor='rainbow';assert.throws(()=>parseProject(JSON.stringify(legacy)),/invalid hourColor/);
 });
 test('optional desk stands retain their dimensions in projects and stay off for earlier designs',()=>{
-  const settings={...DEFAULT_SETTINGS,deskStand:true,standWidth:50,standDepth:55,standLean:15};assert.deepEqual(parseProject(serializeProject(settings)).settings,settings);
-  const old=JSON.parse(serializeProject(settings));for(const key of ['deskStand','standWidth','standDepth','standLean'])delete old.settings[key];assert.equal(parseProject(JSON.stringify(old)).settings.deskStand,false);
-  for(const patch of [{deskStand:'yes'},{standDepth:0},{standWidth:100},{standLean:30}])assert.throws(()=>parseProject(JSON.stringify({...old,settings:{...old.settings,...patch}})),/project/);
+  const settings={...DEFAULT_SETTINGS,deskStand:true,standWidth:50,standDepth:55,standLean:15,standClearance:8};assert.deepEqual(parseProject(serializeProject(settings)).settings,settings);
+  const old=JSON.parse(serializeProject(settings));for(const key of ['deskStand','standWidth','standDepth','standLean','standClearance'])delete old.settings[key];assert.equal(parseProject(JSON.stringify(old)).settings.deskStand,false);assert.equal(parseProject(JSON.stringify(old)).settings.standClearance,4);
+  for(const patch of [{deskStand:'yes'},{standDepth:0},{standWidth:100},{standLean:30},{standClearance:1},{standClearance:21}])assert.throws(()=>parseProject(JSON.stringify({...old,settings:{...old.settings,...patch}})),/project/);
 });
