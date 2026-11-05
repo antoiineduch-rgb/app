@@ -23,6 +23,8 @@ import {printReadiness} from './print-readiness.js';
 import {defaultHourInk,hourInkColors} from './hour-contrast.js';
 import {standDimensions} from './stand-settings.js';
 import {sourceKey,frameKey,layoutKey,paintKey,filamentKey} from './artwork-keys.js';
+import {downloadFile} from './file-downloads.js';
+import {PreviewWorkspace} from './preview-workspace.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial=DEFAULT_SETTINGS;
@@ -239,7 +241,7 @@ function validateDimensions(focus=false){
   return !invalid;
 }
 $('diameterNumber').addEventListener('input',()=>{
-  $('diameterNumber').dataset.editing='true';if(!validateDimensions())return;
+  $('diameterNumber').dataset.editing='true';validateDimensions();if($('diameterNumber').value===''||!$('diameterNumber').validity.valid)return;
   state.diameter=Number($('diameterNumber').value);render({historyGroup:'diameter'});
 });
 $('diameterNumber').addEventListener('blur',()=>{if(validateDimensions())delete $('diameterNumber').dataset.editing;});
@@ -259,6 +261,7 @@ $('inspectStand').onclick=()=>{if(!state.deskStand||importPending||restorePendin
     if(id!=='diameter')input.dataset.editing='true';
     if(!input.validity.valid||input.value===''){validateDimensions();return;}
     state[id]=Number(input.value);
+    if(id==='diameter'){delete $('diameterNumber').dataset.editing;$('diameterNumber').value=state.diameter;}
   }
   validateDimensions();render({historyGroup:['markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)?null:id});
 }));
@@ -317,7 +320,7 @@ $('editMechanism').onclick=()=>{document.querySelector('.advanced-settings').ope
 $('downloadAgain').onclick=()=>$('export').click();
 for(const id of ['thickness','hole'])$(id).addEventListener('blur',()=>{if(validateDimensions()){delete $(id).dataset.editing;$(id).value=state[id];}});
 function tab(upload){$('uploadPanel').hidden=!upload;$('presetPanel').hidden=upload;for(const [id,active]of[['uploadTab',upload],['presetsTab',!upload]]){$(id).classList.toggle('selected',active);$(id).setAttribute('aria-selected',active);$(id).tabIndex=active?0:-1;}}
-document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{state.diameter=Number(b.dataset.size);render();});
+document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{state.diameter=Number(b.dataset.size);delete $('diameterNumber').dataset.editing;$('diameterNumber').value=state.diameter;render();});
 $('showGuide').onclick=()=>$('helpDialog').showModal();
 $('uploadTab').onclick=()=>tab(true);$('presetsTab').onclick=()=>tab(false);
 $('designNav').onclick=()=>{tab(false);$('designGrid').scrollIntoView({behavior:'smooth',block:'center'});toast('Six shapes. Endless possibilities. Pick your starting point.');};
@@ -334,6 +337,18 @@ function scheduleView(){if(viewFrame===null)viewFrame=requestAnimationFrame(()=>
 $('clockStage').onpointermove=e=>{if(!drag)return;ry=Math.max(-60,Math.min(60,drag[3]+(e.clientX-drag[0])*.3));rx=Math.max(-50,Math.min(50,drag[2]-(e.clientY-drag[1])*.3));scheduleView();};
 $('clockStage').onpointerup=$('clockStage').onpointercancel=()=>drag=null;
 $('clockStage').addEventListener('wheel',e=>{if(previewMode==='print')return;e.preventDefault();zoom=Math.min(1.4,Math.max(.6,zoom-e.deltaY*.001));scheduleView();},{passive:false});
+const previewWorkspace=new PreviewWorkspace({onResize:()=>meshView?.resize()});
+$('clockStage').addEventListener('keydown',event=>{
+  if(event.defaultPrevented||event.ctrlKey||event.metaKey||event.altKey)return;
+  const key=event.key.toLowerCase(),actions={'+':'zoomIn','=':'zoomIn','-':'zoomOut','0':'restoreView','1':'frontView','2':'angleView',...(previewMode==='print'?{'3':'backView',...(state.deskStand?{'4':'deskView'}:{})}:{})};
+  if(actions[key]){event.preventDefault();$(actions[key]).click();}
+  else if(key==='f'){event.preventDefault();previewWorkspace.open();}
+  else if(key.startsWith('arrow')){
+    event.preventDefault();
+    if(previewMode==='print')meshView?.orbit(key==='arrowleft'?.12:key==='arrowright'?-.12:0,key==='arrowup'?.12:key==='arrowdown'?-.12:0);
+    else{if(key==='arrowleft'||key==='arrowright')ry=Math.max(-60,Math.min(60,ry+(key==='arrowleft'?-5:5)));else rx=Math.max(-50,Math.min(50,rx+(key==='arrowup'?-5:5)));view();}
+  }
+});
 $('reset').onclick=()=>{
   setPreviewMode('design');
   applyingHistory=false;
@@ -514,9 +529,7 @@ function meshAsync(alpha,n,settings,signal,cachedSTL=null,artwork=null,onStage=(
   });
 }
 function downloadClock(blob,settings,key){
-  const url=URL.createObjectURL(blob),link=document.createElement('a');
-  link.href=url;link.download=`clock-factory-${settings.design}-${settings.diameter}mm${settings.exportFormat==='3mf'&&settings.threeMFTarget==='bambu-a1'?'-bambu-a1':''}.${settings.exportFormat}`;
-  document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
+  downloadFile(blob,`clock-factory-${settings.design}-${settings.diameter}mm${settings.exportFormat==='3mf'&&settings.threeMFTarget==='bambu-a1'?'-bambu-a1':''}.${settings.exportFormat}`);
   lastDownloadKey=key;$('downloadGuide').hidden=fileKey()!==key;
   const bambu=settings.exportFormat==='3mf'&&settings.threeMFTarget==='bambu-a1';
   const steps=bambu?[
@@ -531,7 +544,7 @@ function downloadClock(blob,settings,key){
   $('downloadSteps').replaceChildren(...steps.map(text=>{const item=document.createElement('li');item.textContent=text;return item;}));
   $('downloadNote').textContent=bambu?'A1 · 0.4 mm nozzle. Up to 4 colors with one AMS Lite. Reopen your .clock project in Clock Factory to edit the design.':settings.exportFormat==='stl'?'STL contains the shape and raised details. For colored SVG artwork on your A1, choose Bambu A1 · colors above.':'Standard 3MF contains a color texture. For AMS filament assignments, choose Bambu A1 · colors above.';
   if(flatFrontOnBed(settings)&&settings.exportFormat==='stl')$('downloadNote').textContent=`STL contains the flat clock shape and ${settings.deskStand?'rear stand':'rear box'}. Choose Bambu A1 · colors to keep flat SVG artwork and hour numbers in the print.`;
-  toast(fileKey()===key?'Your print file is ready. Next steps are below the download button.':`Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
+  toast(fileKey()===key?'Your print file is ready. Next steps are below the download button.':`Your ${settings.diameter} mm file is ready. Download again to include your latest edits.`);
 }
 function paintHourDetails(context,settings,frame=null,layout=null,hourColors=null){
   if(!settings.markers)return;
@@ -760,7 +773,7 @@ $('meshBed').onchange=updatePrintSummary;
 $('openProject').onclick=()=>$('projectUpload').click();
 $('saveProject').onclick=()=>{
   if(importPending||restorePending||deletingArtwork)return;
-  try{const text=serializeProject(state,activeArtwork,artworkOrientation),url=URL.createObjectURL(new Blob([text],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=projectFilename(state.projectName);document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);toast('Project saved with your settings and original SVG. Open the .clock file to continue on another device.');}
+  try{const text=serializeProject(state,activeArtwork,artworkOrientation);downloadFile(new Blob([text],{type:'application/json'}),projectFilename(state.projectName),'project');toast('Your project file is ready, with your settings and original SVG. Open the saved .clock file to continue on another device.');}
   catch(error){toast('Could not save project: '+error.message);}
 };
 $('projectUpload').onchange=async event=>{

@@ -73,6 +73,9 @@ jobs:
       - name: Test artwork caching, lightweight exports, and unchanged print files
         run: npm run test:performance
 
+      - name: Test expanded previews, precise editing, and actual native save outcomes
+        run: npm run test:workspace
+
       - name: Build Windows installer
         run: npm run dist:win
 

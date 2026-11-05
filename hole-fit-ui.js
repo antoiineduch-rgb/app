@@ -1,4 +1,5 @@
 import {fitTestPlan,makeFitTestSTL} from './hole-fit.js';
+import {downloadFile} from './file-downloads.js';
 
 const paths=polygons=>polygons.map(polygon=>polygon.map(ring=>ring.map(([x,y],i)=>`${i?'L':'M'}${x} ${y}`).join('')+'Z').join('')).join('');
 function buildStrip(center,workerURL,signal){
@@ -65,7 +66,7 @@ export class HoleFitDialog{
       const buffer=this.buffer||await buildStrip(center,this.workerURL,controller.signal);controller.signal.throwIfAborted();
       if(!this.dialog.open)return;
       this.buffer=buffer;this.prepared=true;
-      const url=URL.createObjectURL(new Blob([buffer],{type:'model/stl'})),link=document.createElement('a');link.href=url;link.download=`clock-factory-fit-test-${center.toFixed(1)}mm.stl`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
+      downloadFile(new Blob([buffer],{type:'model/stl'}),`clock-factory-fit-test-${center.toFixed(1)}mm.stl`,'fit');
       this.status.textContent='Your test file is ready. Print it flat with the same material and slicer settings as your clock, then select the best-fitting size.';
     }catch(error){this.status.textContent=error.name==='AbortError'?'Fit test cancelled. You can prepare it again.':'Could not prepare the fit test: '+error.message;}
     finally{if(this.controller===controller){this.controller=null;this.pending=false;this.update();}}

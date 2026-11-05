@@ -20,6 +20,7 @@ export class PrintView{
     this.controls.addEventListener('change',()=>this.render());
     this.canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();onError(Error('3D graphics were interrupted. Switch to Design, then retry Print mesh.'));});
     this.canvas.addEventListener('keydown',event=>{
+      if(event.ctrlKey||event.metaKey||event.altKey)return;
       if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','+','=','-'].includes(event.key)){
         event.preventDefault();if(event.key.startsWith('Arrow')){if(event.key==='ArrowLeft'||event.key==='ArrowRight')this.controls.rotateLeft(event.key==='ArrowLeft'?.12:-.12);else this.controls.rotateUp(event.key==='ArrowUp'?.12:-.12);this.controls.update();}else this.zoom(event.key==='-'?1.12:1/1.12);
       }
@@ -30,7 +31,12 @@ export class PrintView{
     const rear=new DirectionalLight(0xfff5de,2);rear.position.set(-100,-70,-300);this.scene.add(rear);
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(container);this.resize();
   }
-  resize(){const {width,height}=this.container.getBoundingClientRect();if(width<2||height<2)return;this.camera.aspect=width/height;this.camera.updateProjectionMatrix();this.renderer.setSize(width,height,false);this.render();}
+  resize(){
+    const {width,height}=this.container.getBoundingClientRect();if(width<2||height<2)return;
+    const aspect=width/height,scale=Math.max(1,1/aspect),ratio=scale/(this.fitScale||1);this.fitScale=scale;
+    if(Math.abs(ratio-1)>.00001){const offset=this.camera.position.clone().sub(this.controls.target).multiplyScalar(ratio);this.camera.position.copy(this.controls.target).add(offset);this.controls.minDistance*=ratio;this.controls.maxDistance*=ratio;this.controls.update();}
+    this.camera.aspect=aspect;this.camera.updateProjectionMatrix();this.renderer.setSize(width,height,false);this.render();
+  }
   render(){if(this.visible&&this.model&&this.frame===null)this.frame=requestAnimationFrame(()=>{this.frame=null;if(this.visible&&this.model)this.renderer.render(this.scene,this.camera);});}
   setVisible(visible){if(this.visible===visible)return;this.visible=visible;if(visible)this.resize();}
   async setModel(result,settings,{signal}={}){
@@ -67,7 +73,7 @@ export class PrintView{
     if(sequence!==this.sequence||signal?.aborted){geometry.dispose();base.dispose();painted.dispose();map?.dispose();signal?.throwIfAborted();return;}
     if(this.model){this.scene.remove(this.model);this.model.geometry.dispose();for(const material of this.model.material)material.dispose();this.texture?.dispose();}
     this.texture=map;this.model=new Mesh(geometry,[base,painted]);this.model.castShadow=true;this.model.receiveShadow=false;this.scene.add(this.model);this.renderer.shadowMap.needsUpdate=true;this.appearanceKey=null;
-    this.span=Math.max(...result.stats.dimensions.slice(0,2));this.controls.minDistance=this.span*.35;this.controls.maxDistance=this.span*6;
+    this.span=Math.max(...result.stats.dimensions.slice(0,2));this.controls.minDistance=this.span*.35*(this.fitScale||1);this.controls.maxDistance=this.span*6*(this.fitScale||1);
     this.setAppearance(settings.faceColor,this.colored,this.wireframe);this.setView('angle');this.resize();
     this.canvas.dataset.triangles=String(count);this.canvas.dataset.vertices=String(result.stats.vertices);this.canvas.dataset.span=String(this.span);
     this.canvas.dataset.modelLoads=String(sequence);
@@ -115,7 +121,7 @@ export class PrintView{
   setView(view){
     if(view==='desk'&&!this.deskPose)view='angle';
     this.viewMode=view;for(const object of this.bed||[])object.visible=this.plateVisible&&view!==(this.faceDown?'front':'back');
-    const distance=(this.span||200)*1.65;
+    const distance=(this.span||200)*1.65*(this.fitScale||1);
     this.controls.target.set(0,0,0);
     if(this.model){this.model.rotation.set(0,0,0);this.model.position.set(0,0,0);}
     if(view==='desk'){
@@ -126,5 +132,6 @@ export class PrintView{
     this.controls.update();this.render();
   }
   zoom(factor){const offset=this.camera.position.clone().sub(this.controls.target);offset.setLength(Math.max(this.controls.minDistance,Math.min(this.controls.maxDistance,offset.length()*factor)));this.camera.position.copy(this.controls.target).add(offset);this.controls.update();this.render();}
+  orbit(horizontal,vertical){this.controls.rotateLeft(horizontal);this.controls.rotateUp(vertical);this.controls.update();}
   dispose(){this.sequence++;this.textureSequence=(this.textureSequence||0)+1;if(this.frame!==null)cancelAnimationFrame(this.frame);this.observer.disconnect();this.controls.dispose();if(this.model){this.model.geometry.dispose();for(const material of this.model.material)material.dispose();}for(const object of this.bed||[]){object.geometry.dispose();object.material.dispose();}this.texture?.dispose();this.filamentTexture?.dispose();this.keyLight.shadow.map?.dispose();this.renderer.dispose();this.canvas.remove();}
 }

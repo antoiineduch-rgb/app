@@ -1,5 +1,5 @@
 const { app, BrowserWindow, Menu, dialog, protocol, session } = require('electron');
-const { join } = require('node:path');
+const { join,basename } = require('node:path');
 const { appResponse, isAppURL, ORIGIN } = require('./assets.cjs');
 
 app.setName('Clock Factory');
@@ -28,6 +28,7 @@ function createWindow() {
     icon: join(__dirname, 'icon.png'),
     show: false,
     webPreferences: {
+      preload: join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -67,7 +68,7 @@ if (!app.requestSingleInstanceLock()) {
       const allowed = isAppURL(details.url) || details.url.startsWith('blob:clock://studio/') || details.url.startsWith('data:');
       callback({ cancel: !allowed });
     });
-    appSession.on('will-download', (event, item) => {
+    appSession.on('will-download', (event, item, contents) => {
       const extension=item.getFilename().match(/\.(stl|3mf|clock)$/i)?.[1].toLowerCase();
       if (!item.getURL().startsWith('blob:clock://studio/') || !extension) {
         event.preventDefault();
@@ -79,6 +80,12 @@ if (!app.requestSingleInstanceLock()) {
         defaultPath: join(app.getPath('downloads'), item.getFilename()),
         filters: [{ name: extension==='clock'?'Clock Factory project':extension==='3mf'?'3MF clock model':fitTest?'STL hole-fit test':'STL clock mesh', extensions: [extension] }],
       });
+      const url=item.getURL(),notify=state=>{
+        if(contents&&!contents.isDestroyed()&&isAppURL(contents.getURL()))contents.send('clock:download',{url,state,filename:basename(item.getSavePath()||item.getFilename())});
+      };
+      let saving=false;
+      item.on('updated',(_event,state)=>{if(!saving&&state==='progressing'&&!item.isPaused()&&item.getSavePath()){saving=true;notify('saving');}});
+      item.once('done',(_event,state)=>notify(state));
     });
     app.setAboutPanelOptions({
       applicationName: 'Clock Factory',
