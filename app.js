@@ -16,11 +16,12 @@ import {normalizeFilamentOverrides} from './filament-colors.js';
 import {HoleFitDialog} from './hole-fit-ui.js';
 import {autoHourFit,fitHourLayout,hourLayoutMarkup} from './hour-layout.js';
 import {RECESS_SKIN,recessDimensions} from './mechanism-recess.js';
-import {raisedMechanismBox,flatMechanismBox,boxDimensions} from './mechanism-box.js';
+import {raisedMechanismBox,flatFrontOnBed,boxDimensions} from './mechanism-box.js';
 import {artworkPlacement} from './artwork-surface.js';
 import {flatColorClock} from './quick-setup.js';
 import {printReadiness} from './print-readiness.js';
 import {defaultHourInk,hourInkColors} from './hour-contrast.js';
+import {standDimensions} from './stand-settings.js';
 const $=id=>document.getElementById(id);
 const colors=[['Terracotta','#c47f62'],['Oat milk','#dfd5bd'],['Sage','#94a18a'],['Forest','#485c48'],['Ink','#434643'],['Lavender','#aaa0b5'],['Dusty rose','#c99d99']];
 const initial=DEFAULT_SETTINGS;
@@ -47,7 +48,7 @@ let previewMode='design',meshView=null,loadedMeshKey=null,meshPreviewKey=null,me
 let bed={width:220,depth:220},bedPreset='custom';
 try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500)){bed={width:saved.width,depth:saved.depth};if(saved.preset==='a1'&&saved.width===256&&saved.depth===256)bedPreset='a1';}}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
-function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone,settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?[settings.hourStyle,settings.hourColor]:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.mechanismMount,settings.mechanismFlatFront,settings.mechanismWall,settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false]);}
+function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,settings.svgDetail,settings.svgRelief,settings.svgTone,settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)?'smooth':settings.texture,settings.markers,settings.markers?[settings.hourStyle,settings.hourColor]:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.mechanismMount,settings.mechanismFlatFront,settings.mechanismWall,settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false,settings.deskStand?[settings.standWidth,settings.standDepth,settings.standLean]:false]);}
 function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[colors[settings.color][1],settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor,Object.entries(settings.bambuColors).sort()]:null]:null]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
 function updateSaveLabel(){
@@ -78,7 +79,7 @@ function faceMarkup(){
   return usesSVGBacking(state)?`<g transform="${backingViewTransform()}">${markup}</g>`:markup;
 }
 function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
-  const color=colors[state.color][1],detailed=originalArtwork(),backed=usesSVGBacking(state),flat=flatMechanismBox(state),visibleTexture=flat?'smooth':state.texture,hourInk=defaultHourInk({...state,faceColor:color});
+  const color=colors[state.color][1],detailed=originalArtwork(),backed=usesSVGBacking(state),flat=flatFrontOnBed(state),visibleTexture=flat?'smooth':state.texture,hourInk=defaultHourInk({...state,faceColor:color});
   const nextPreviewKey=JSON.stringify([state.design,state.color,visibleTexture,state.markers,state.hourStyle,state.hourColor,state.numberSize,state.numberPosition,state.diameter,state.svgDetail,customRevision,artworkOrientation,backed,state.hourFit,backed||autoHourFit(state)?[state.svgBackingMargin,state.hole]:null]);
   if(nextPreviewKey!==previewKey){
   let ticks='',numberClearance='';
@@ -117,9 +118,10 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   });
   $('diameterValue').textContent=state.diameter;$('diameter').setAttribute('aria-valuetext',`${state.diameter/10} centimeters across`);$('colorName').textContent=colors[state.color][0];$('measure').textContent=state.diameter+' mm';
   $('exportSize').textContent=`${state.diameter} mm across · ${Number(artworkSurfaceHeight(state).toFixed(1))} mm ${backed?'base + backing':'base'}${raisedMechanismBox(state)?' + '+state.recessDepth+' mm rear box':''}`;
+  if(state.deskStand)$('exportSize').textContent=`${state.diameter} mm across · ${Number((artworkSurfaceHeight(state)+state.standDepth).toFixed(1))} mm overall · rear stand`;
   $('thicknessLabelText').textContent=backed?'Artwork thickness':'Base thickness';
   $('fitHint').textContent=`The threaded shaft must pass through the face and leave room for the nut.${backed?' The backing adds '+backingDepth(state)+' mm below the artwork; include it and any relief when checking shaft length.':''}`;
-  if(raisedMechanismBox(state))$('fitHint').textContent=`The movement rests on the back of the ${Number(artworkSurfaceHeight(state).toFixed(1))} mm face. The box walls add height behind it; they do not add to the thickness the shaft passes through. Leave room for the washer and nut.`;
+  if(raisedMechanismBox(state)||state.deskStand)$('fitHint').textContent=`The movement rests on the back of the ${Number(artworkSurfaceHeight(state).toFixed(1))} mm face. Rear accessories add height behind it; they do not add to the thickness the shaft passes through. Leave room for the washer and nut.`;
   $('svgBacking').checked=state.svgBacking;$('svgBackingOptions').hidden=!state.svgBacking;
   for(const id of ['svgBackingThickness','svgBackingMargin']){$(id).value=state[id];$(id+'Value').textContent=state[id];}
   $('sizeHint').textContent=`${state.diameter/10} cm across — ${state.diameter<=160?'a compact clock for a shelf or desk.':state.diameter<=220?'a lovely size for a desk or small wall.':'a statement piece for your wall. Check your printer’s bed size.'}`;
@@ -147,19 +149,25 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   if(forceInputs||document.activeElement!==$('projectName'))$('projectName').value=state.projectName;
   $('showHands').checked=state.showHands;const hands=$('clockSvg').querySelector('#previewHands');if(hands)hands.toggleAttribute('hidden',!state.showHands);
   $('mechanismQuickSummary').textContent=raisedMechanismBox(state)?`${state.recessWidth} × ${state.recessHeight} mm movement · ${state.recessDepth} mm box · ${Number(artworkSurfaceHeight(state).toFixed(1))} mm face`:state.mechanismRecess?`${state.recessWidth} × ${state.recessHeight} mm pocket · ${state.recessDepth} mm deep`:`${state.hole.toFixed(1)} mm center hole · optional rear box`;
+  if(state.deskStand)$('mechanismQuickSummary').textContent+=` · ${state.standLean}° desk stand`;
   $('mechanismRecess').checked=state.mechanismRecess;$('recessOptions').hidden=!state.mechanismRecess;
-  $('mechanismMount').value=state.mechanismMount;$('mechanismFlatFront').checked=state.mechanismFlatFront;
+  $('mechanismMount').value=state.mechanismMount;$('mechanismFlatFront').checked=state.deskStand||state.mechanismFlatFront;$('mechanismFlatFront').disabled=state.deskStand;
   const box=state.mechanismMount==='box';
-  for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall'])if(forceInputs||(document.activeElement!==$(id)&&!$(id).dataset.editing)){$(id).value=state[id];if(forceInputs)delete $(id).dataset.editing;}
-  $('boxWallControl').hidden=$('flatFrontControl').hidden=!box;$('flatFrontHelp').hidden=!box;
+  for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean'])if(forceInputs||(document.activeElement!==$(id)&&!$(id).dataset.editing)){$(id).value=state[id];if(forceInputs)delete $(id).dataset.editing;}
+  $('boxWallControl').hidden=!box;$('flatFrontControl').hidden=$('flatFrontHelp').hidden=!(raisedMechanismBox(state)||state.deskStand);
   $('flatFrontHelp').textContent=state.mechanismFlatFront?'Keeps SVG colors and numbers flat in color 3MF. Raised front details are paused; STL contains the shape and box only.':'Raised front details are retained. Turn this on for a flat front against the print bed, with flat color artwork and numbers.';
+  if(state.deskStand)$('flatFrontHelp').textContent='The stand prints with a flat front. SVG artwork and numbers use flat color in 3MF. Turn off the stand to restore your front-relief preference.';
   $('recessDepthLabel').textContent=box?'Box height · mm':'Pocket depth · mm';
   $('mountHelp').textContent=box?'Adds four walls on the back, open at the top. The clock face stays at your chosen thickness.':'Cuts a pocket into the back. Enabling it thickens the face or backing enough to retain 1.2 mm of front material.';
   const pocket=box?boxDimensions(state):recessDimensions(state),mm=value=>Number(value.toFixed(2));
   $('recessSummary').textContent=box?`Box: ${mm(pocket.width)} × ${mm(pocket.height)} mm inside · ${pocket.depth} mm high · ${pocket.wall} mm walls. Outside: ${mm(pocket.outerWidth)} × ${mm(pocket.outerHeight)} mm. Verify your movement dimensions before printing.`:`Pocket: ${pocket.width} × ${pocket.height} mm · ${pocket.depth} mm deep. Keeps at least ${RECESS_SKIN} mm of front material. Verify your movement dimensions before printing.`;
-  $('mountPrintHelp').textContent=flat?'Use Print mesh → Back to inspect the open box. Export is already front-down with the walls pointing up.':box?'Use Print mesh → Back to inspect the box. Raised front details need a suitable print orientation and may need supports.':'Use Print mesh → Back to inspect it. The rear pocket may need supports; check orientation and bridging in your slicer.';
+  $('mountPrintHelp').textContent=state.deskStand?'Use Print mesh → Desk to inspect the movement and stand. The print file stays front-down.':flat?'Use Print mesh → Back to inspect the open box. Export is already front-down with the walls pointing up.':box?'Use Print mesh → Back to inspect the box. Raised front details need a suitable print orientation and may need supports.':'Use Print mesh → Back to inspect it. The rear pocket may need supports; check orientation and bridging in your slicer.';
   $('supportBadge').textContent=flat?'Flat front · box walls up':state.mechanismRecess?(box?'Rear box · check supports':'Rear pocket · check supports'):'No supports needed';
   $('printabilitySummary').textContent=flat?'✓ Flat front on bed · open box grows upward':state.mechanismRecess?'Mechanism mount · review orientation and supports':'✓ Flat back · no supports needed';
+  $('deskStand').checked=state.deskStand;$('standOptions').hidden=!state.deskStand;
+  const stand=standDimensions(state);$('standSummary').textContent=`${stand.width} mm wide · ${stand.depth} mm behind the face · ${stand.lean}° backward lean. The support stays below the mechanism and is included in STL and 3MF.`;
+  if(state.deskStand){$('supportBadge').textContent='Flat front · rear desk stand';$('printabilitySummary').textContent='✓ Flat front on bed · rear stand grows upward';}
+  if(meshCameraView==='desk'&&!state.deskStand)meshCameraView='angle';$('deskView').hidden=previewMode!=='print'||!state.deskStand;
   updateArtworkUI();validateDimensions();persist();
   if(recordHistory)checkpointHistory(historyGroup);updateHistoryUI();updatePrintSummary();scheduleMeshPreview();
 }
@@ -209,13 +217,15 @@ designs.forEach(d=>{const b=document.createElement('button');b.className='design
 colors.forEach(([name,color],i)=>{const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=name;b.setAttribute('aria-label',name);b.onclick=()=>{state.color=i;render();};$('swatches').append(b);});
 document.querySelectorAll('[data-texture]').forEach(b=>b.onclick=()=>{state.texture=b.dataset.texture;render();});
 const mountFields=()=>['recessWidth','recessHeight','recessDepth','recessClearance',...(state.mechanismMount==='box'?['mechanismWall']:[])];
+const accessoryFields=()=>[...(state.mechanismRecess?mountFields():[]),...(state.deskStand?['standWidth','standDepth','standLean']:[])];
 function validateDimensions(focus=false){
-  const ids=['diameterNumber','thickness','hole',...(state.mechanismRecess?mountFields():[])],invalid=ids.map($).find(input=>input.value===''||!input.validity.valid);
+  const ids=['diameterNumber','thickness','hole',...accessoryFields()],invalid=ids.map($).find(input=>input.value===''||!input.validity.valid);
   for(const id of ids)$(id).setAttribute('aria-invalid',String($(id).value===''||!$(id).validity.valid));
-  $('dimensionError').hidden=!invalid||invalid.id==='diameterNumber'||mountFields().includes(invalid.id);$('sizeError').hidden=!invalid||invalid.id!=='diameterNumber';
+  $('dimensionError').hidden=!invalid||invalid.id==='diameterNumber'||accessoryFields().includes(invalid.id);$('sizeError').hidden=!invalid||invalid.id!=='diameterNumber';
   if(invalid){
     const size=invalid.id==='diameterNumber';
-    if(mountFields().includes(invalid.id)){$('recessError').hidden=false;$('recessError').textContent='Mechanism mount: enter dimensions within the displayed ranges and steps.';}
+    if(invalid.id.startsWith('stand')){$('standError').hidden=false;$('standError').textContent='Desk stand: use the displayed measurement ranges and steps.';}
+    else if(mountFields().includes(invalid.id)){$('recessError').hidden=false;$('recessError').textContent='Mechanism mount: enter dimensions within the displayed ranges and steps.';}
     else $(size?'sizeError':'dimensionError').textContent=size?'Enter a diameter from 100 to 300 mm, in steps of 1 mm.':invalid.id==='hole'?'Enter a center hole from 5 to 15 mm, in steps of 0.1 mm.':'Enter a face thickness from 2 to 10 mm, in steps of 0.5 mm.';
     if(focus){if(!size)document.querySelector('.advanced-settings').open=true;invalid.focus();}
   }
@@ -236,24 +246,25 @@ function makeRecessRoom(){
   else{state.thickness=Math.max(state.thickness,Math.ceil((required-1e-7)*2)/2);delete $('thickness').dataset.editing;$('thickness').value=state.thickness;}
 }
 function enableSupportingBacking(){state.svgBacking=true;makeRecessRoom();render({forceInputs:true});}
-$('backingForHours').onclick=enableSupportingBacking;$('backingForRecess').onclick=enableSupportingBacking;
-['diameter','thickness','hole','markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront'].forEach(id=>$(id).addEventListener('input',()=>{
+$('backingForHours').onclick=enableSupportingBacking;$('backingForRecess').onclick=enableSupportingBacking;$('backingForStand').onclick=enableSupportingBacking;
+$('inspectStand').onclick=()=>{if(!state.deskStand||importPending||restorePending||deletingArtwork)return;setPreviewMode('print');meshCamera('desk');$('preview').scrollIntoView({behavior:'smooth',block:'start'});};
+['diameter','thickness','hole','markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront','deskStand'].forEach(id=>$(id).addEventListener('input',()=>{
   const input=$(id);
-  if(['markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront'].includes(id)){state[id]=input.checked;if((id==='mechanismRecess'||id==='svgBacking')&&input.checked)makeRecessRoom();}
+  if(['markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)){state[id]=input.checked;if((id==='mechanismRecess'||id==='svgBacking')&&input.checked)makeRecessRoom();}
   else{
     if(id!=='diameter')input.dataset.editing='true';
     if(!input.validity.valid||input.value===''){validateDimensions();return;}
     state[id]=Number(input.value);
   }
-  validateDimensions();render({historyGroup:['markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront'].includes(id)?null:id});
+  validateDimensions();render({historyGroup:['markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)?null:id});
 }));
-for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall'])$(id).addEventListener('input',()=>{
+for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean'])$(id).addEventListener('input',()=>{
   $(id).dataset.editing='true';
   $(id).setAttribute('aria-invalid',String($(id).value===''||!$(id).validity.valid));
   if($(id).value===''||!$(id).validity.valid){validateDimensions();return;}
   state[id]=Number($(id).value);if(id==='recessDepth')makeRecessRoom();render({historyGroup:id});
 });
-for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall'])$(id).addEventListener('blur',()=>{if($(id).value!==''&&$(id).validity.valid){delete $(id).dataset.editing;$(id).value=state[id];}});
+for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean'])$(id).addEventListener('blur',()=>{if($(id).value!==''&&$(id).validity.valid){delete $(id).dataset.editing;$(id).value=state[id];}});
 for(const id of ['hourStyle','hourColor','exportFormat','svgDetail','svgTone','threeMFTarget','filamentCount','bambuBackColor','mechanismMount'])$(id).addEventListener('change',()=>{
   const value=id==='filamentCount'?Number($(id).value):$(id).value,allowed={hourStyle:['ticks','arabic','roman'],hourColor:['light','dark','auto'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light'],threeMFTarget:['bambu-a1','standard'],filamentCount:[2,4],bambuBackColor:['background','face'],mechanismMount:['box','recess']}[id];
   if(!allowed.includes(value))return;state[id]=value;if(id==='mechanismMount')makeRecessRoom();render();
@@ -265,8 +276,8 @@ function updateExportFormatUI(){
   const format=state.exportFormat.toUpperCase();$('exportFormat').value=state.exportFormat;
   const bambu=state.exportFormat==='3mf'&&state.threeMFTarget==='bambu-a1';
   const single=state.exportFormat==='stl';
-  const flat=flatMechanismBox(state);$('flatFrontNotice').hidden=!flat;
-  $('flatFrontNotice').textContent='Flat front on bed: SVG colors and hour numbers stay flat in color 3MF. STL contains the outline and rear box; front relief is paused.';
+  const flat=flatFrontOnBed(state);$('flatFrontNotice').hidden=!flat;
+  $('flatFrontNotice').textContent=`Flat front on bed: SVG colors and hour numbers stay flat in color 3MF. STL contains the outline and ${state.deskStand?'rear support':'rear box'}; front relief is paused.`;
   for(const [id,selected]of [['singleColorPrint',single],['bambuColorPrint',bambu]]){$(id).classList.toggle('selected',selected);$(id).setAttribute('aria-pressed',String(selected));}
   $('printModeLabel').textContent=single?'One-color print':bambu?'Bambu A1 · color':'Standard 3MF';
   $('printModeHint').textContent=single?'A simple print in one filament. Your SVG details can still stand out in relief.':bambu?`A1 / 0.4 mm · up to ${state.filamentCount} filaments. SVG colors become printable color regions; gradients become solid colors.`:'Original SVG colors are stored as a texture. Check that your software supports 3MF textures; this option does not assign filaments.';
@@ -275,8 +286,8 @@ function updateExportFormatUI(){
   $('exportFormatHint').textContent=originalArtwork()?(state.exportFormat==='3mf'?'3MF keeps the SVG relief and original artwork as a color texture. Texture color support depends on your slicer.':'STL keeps the SVG details as relief. STL stores geometry; use 3MF to keep the artwork colors too.'):(state.exportFormat==='3mf'?'3MF includes the mesh, millimeter units, and selected face color.':'STL exports the printable mesh. Colors are a filament preview.');
   $('threeMFOptions').hidden=state.exportFormat!=='3mf';$('threeMFTarget').value=state.threeMFTarget;$('filamentCount').value=state.filamentCount;$('bambuBackColor').value=state.bambuBackColor;$('bambuOptions').hidden=!bambu;
   if(bambu)$('exportFormatHint').textContent='Open the .3mf as a project in Bambu Studio. Check your A1 0.4 mm and filament presets, then map the numbered colors to your AMS spools before slicing.';
-  if(flat&&single){$('printModeHint').textContent='A flat face and raised rear box in one piece. Use Bambu A1 · colors to print the SVG artwork and hour numbers in color.';$('exportFormatHint').textContent='STL contains the outline and open rear box. Flat SVG artwork and numbers need a color 3MF; raised front details are paused for bed contact.';}
-  else if(flat&&!bambu)$('exportFormatHint').textContent='3MF keeps the flat SVG artwork and numbers as a color texture. Export is front-down with the rear box pointing up. Texture support depends on your slicer.';
+  if(flat&&single){$('printModeHint').textContent=`A flat face and ${state.deskStand?'rear stand':'raised rear box'} in one piece. Use Bambu A1 · colors to print the SVG artwork and hour numbers in color.`;$('exportFormatHint').textContent=`STL contains the outline and ${state.deskStand?'rear stand':'open rear box'}. Flat SVG artwork and numbers need a color 3MF; raised front details are paused for bed contact.`;}
+  else if(flat&&!bambu)$('exportFormatHint').textContent='3MF keeps the flat SVG artwork and numbers as a color texture. Export is front-down with the rear accessories pointing up. Texture support depends on your slicer.';
   showFilamentPalette(exportCache?.key===fileKey()?exportCache.palette:null);
   updateFilamentPreview();
   updateMeshAppearance();
@@ -308,9 +319,9 @@ $('uploadTab').onclick=()=>tab(true);$('presetsTab').onclick=()=>tab(false);
 $('designNav').onclick=()=>{tab(false);$('designGrid').scrollIntoView({behavior:'smooth',block:'center'});toast('Six shapes. Endless possibilities. Pick your starting point.');};
 $('editorLink').onclick=e=>{e.preventDefault();window.scrollTo({top:0,behavior:'smooth'});};
 function view(){ $('clockObject').style.transform=`perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg) rotateZ(${rz}deg) scale(${zoom})`;const front=rx===0&&ry===0;$('frontView').classList.toggle('selected',front);$('angleView').classList.toggle('selected',!front);}
-function meshCamera(mode){meshCameraView=mode;meshView?.setView(mode);$('meshBed').disabled=mode===(flatMechanismBox(state)?'front':'back');for(const [id,view]of [['frontView','front'],['angleView','angle'],['backView','back']])$(id).classList.toggle('selected',mode===view);}
+function meshCamera(mode){if(mode==='desk'&&!state.deskStand)mode='angle';meshCameraView=mode;$('meshBedLabel').textContent=mode==='desk'?'Desk surface':'Build plate';$('previewBadge').textContent=mode==='desk'?'Desk preview · file prints flat':'Actual print model';meshView?.setView(mode);$('meshBed').disabled=mode===(flatFrontOnBed(state)?'front':'back');for(const [id,view]of [['frontView','front'],['angleView','angle'],['backView','back'],['deskView','desk']])$(id).classList.toggle('selected',mode===view);}
 $('frontView').onclick=()=>{if(previewMode==='print'){meshCamera('front');return;}rx=ry=rz=0;view();};$('angleView').onclick=()=>{if(previewMode==='print'){meshCamera('angle');return;}rx=12;ry=-19;rz=-7;view();};
-$('backView').onclick=()=>meshCamera('back');
+$('backView').onclick=()=>meshCamera('back');$('deskView').onclick=()=>meshCamera('desk');
 $('restoreView').onclick=()=>{if(previewMode==='print'){meshCamera('angle');return;}zoom=1;rx=12;ry=-19;rz=-7;view();};
 $('zoomIn').onclick=()=>{if(previewMode==='print'){meshView?.zoom(1/1.12);return;}zoom=Math.min(1.4,zoom+.1);view();};$('zoomOut').onclick=()=>{if(previewMode==='print'){meshView?.zoom(1.12);return;}zoom=Math.max(.6,zoom-.1);view();};
 let drag=null;$('clockStage').onpointerdown=e=>{if(previewMode==='print')return;drag=[e.clientX,e.clientY,rx,ry];$('clockStage').setPointerCapture(e.pointerId);};
@@ -504,15 +515,15 @@ function downloadClock(blob,settings,key){
   const steps=bambu?[
     'Open the .3mf in Bambu Studio and choose “Open as project” to load its colors.',
     'Choose your actual filament presets and match each numbered color to an AMS spool.',
-    flatMechanismBox(settings)?'Keep the flat front on the plate and the open box pointing up; review flushing volumes, then slice and print.':settings.mechanismRecess?'Inspect the rear mount, print orientation and supports; review flushing volumes, then slice and print.':'Check the flat side is on the plate, review flushing volumes, then slice and print.'
+    flatFrontOnBed(settings)?`Keep the flat front on the plate and the ${settings.deskStand?'rear stand':'open box'} pointing up; review flushing volumes, then slice and print.`:settings.mechanismRecess?'Inspect the rear mount, print orientation and supports; review flushing volumes, then slice and print.':'Check the flat side is on the plate, review flushing volumes, then slice and print.'
   ]:[
     `Open the .${settings.exportFormat} file in your printer’s slicer.`,
-    flatMechanismBox(settings)?'Keep the flat front on the print bed, with the open box pointing up. Check the dimensions.':settings.mechanismRecess?'Review the rear mount, print orientation and support settings in your slicer.':'Place the flat side on the print bed and check the dimensions.',
+    flatFrontOnBed(settings)?`Keep the flat front on the print bed, with the ${settings.deskStand?'rear stand':'open box'} pointing up. Check the dimensions.`:settings.mechanismRecess?'Review the rear mount, print orientation and support settings in your slicer.':'Place the flat side on the print bed and check the dimensions.',
     'Slice and print, then fit your clock movement and hands.'
   ];
   $('downloadSteps').replaceChildren(...steps.map(text=>{const item=document.createElement('li');item.textContent=text;return item;}));
   $('downloadNote').textContent=bambu?'A1 · 0.4 mm nozzle. Up to 4 colors with one AMS Lite. Reopen your .clock project in Clock Factory to edit the design.':settings.exportFormat==='stl'?'STL contains the shape and raised details. For colored SVG artwork on your A1, choose Bambu A1 · colors above.':'Standard 3MF contains a color texture. For AMS filament assignments, choose Bambu A1 · colors above.';
-  if(flatMechanismBox(settings)&&settings.exportFormat==='stl')$('downloadNote').textContent='STL contains the flat clock shape and rear box. Choose Bambu A1 · colors to keep flat SVG artwork and hour numbers in the print.';
+  if(flatFrontOnBed(settings)&&settings.exportFormat==='stl')$('downloadNote').textContent=`STL contains the flat clock shape and ${settings.deskStand?'rear stand':'rear box'}. Choose Bambu A1 · colors to keep flat SVG artwork and hour numbers in the print.`;
   toast(fileKey()===key?'Your print file is ready. Next steps are below the download button.':`Your ${settings.diameter} mm clock was exported. Download again to include your latest edits.`);
 }
 function paintHourDetails(context,settings,frame=null,layout=null,hourColors=null){
@@ -561,7 +572,7 @@ async function ensureMesh(snapshot,signal,onStage=()=>{}){
   try{
     const result=await meshStore.get(geometry,async(jobSignal,stage)=>{
       jobSignal.throwIfAborted();stage('outline');const raw=sourceRaster(snapshot);let artwork=null;
-      if(originalArtwork(settings)||flatMechanismBox(settings)){
+      if(originalArtwork(settings)||flatFrontOnBed(settings)){
         const paint=paintedRaster(snapshot,raw),png=await new Promise(resolve=>paint.canvas.toBlob(resolve,'image/png'));jobSignal.throwIfAborted();
         if(!png)throw Error('The SVG color artwork could not be prepared.');
         artwork={rgba:raw.rgba,texture:{png:new Uint8Array(await png.arrayBuffer()),...artworkPlacement(settings,paint.frame)}};
@@ -586,7 +597,7 @@ const stageMessage=stage=>({outline:'Tracing the clock outline…',details:'Addi
 let readinessKey='',readinessAction=null;
 function updateReadiness(){
   const key=geometryKey(),loading=importPending||restorePending||deletingArtwork;
-  const invalid=['diameterNumber','thickness','hole',...(state.mechanismRecess?mountFields():[])].find(id=>$(id).value===''||!$(id).validity.valid);
+  const invalid=['diameterNumber','thickness','hole',...accessoryFields()].find(id=>$(id).value===''||!$(id).validity.valid);
   const report=printReadiness({settings:state,stats:meshStore.peek(key)?.stats,error:lastGeometryError?.key===key?lastGeometryError.message:null,hours:!loading&&autoHourFit(state)?sourceInfo(designSnapshot()).layout:null,invalid,plate:bed,plateValid:[$('bedWidth'),$('bedDepth')].every(input=>input.value!==''&&input.validity.valid),loading,checking:!!checkController&&key===checkKey});
   readinessAction=report.action;
   $('readinessAction').hidden=!report.action;$('readinessAction').textContent=report.label||'Check this design';
@@ -601,11 +612,13 @@ function updateReadiness(){
 async function runReadinessAction(action){
   if(importPending||restorePending||deletingArtwork)return;
   if(action==='dimensions'){validateDimensions(true);return;}
+  if(action==='stand'){document.querySelector('.advanced-settings').open=true;$('standWidth').focus();return;}
   if(action==='printer'){$('bedSettings').open=true;$('bedWidth').focus();return;}
   if(action==='hours'||action==='backing'){enableSupportingBacking();await $('checkModel').onclick();return;}
   if(action==='room'){makeRecessRoom();render({forceInputs:true});await $('checkModel').onclick();return;}
   if(action==='colors'){$('bambuColorPrint').click();return;}
   if(action==='fit'){$('fitToBed').click();await $('checkModel').onclick();return;}
+  if(action==='desk'){$('inspectStand').click();return;}
   if(action==='back'){setPreviewMode('print');meshCamera('back');$('preview').scrollIntoView({behavior:'smooth',block:'start'});return;}
   if(action==='preview'){setPreviewMode('print');$('preview').scrollIntoView({behavior:'smooth',block:'start'});return;}
   if(action==='check')await $('checkModel').onclick();
@@ -637,6 +650,8 @@ function updatePrintSummary(){
   $('fitToBed').hidden=!valid||!fit||fit.fits;
   $('connectArtwork').hidden=state.design!=='custom'||state.svgBacking||!stats||stats.components<2;$('connectArtwork').disabled=!!checkController||importPending||restorePending||deletingArtwork;
   holeFit.update();
+  const standError=state.deskStand&&['standWidth','standDepth','standLean'].some(id=>$(id).value===''||!$(id).validity.valid)?'Desk stand: use the displayed measurement ranges and steps.':state.deskStand&&lastGeometryError?.key===key&&lastGeometryError.message.startsWith('Desk stand:')?lastGeometryError.message:null;
+  $('standError').hidden=!standError;$('standError').textContent=standError||'';$('backingForStand').hidden=!state.deskStand||state.design!=='custom'||state.svgBacking;
   if(meshView)meshView.setBed(bed.width,bed.depth,fit?.fits!==false,$('meshBed').checked);
   updateReadiness();
 }
@@ -686,7 +701,7 @@ function setPreviewMode(mode){
   for(const [id,active]of [['designPreview',mode==='design'],['printPreview',mode==='print']]){$(id).classList.toggle('selected',active);$(id).setAttribute('aria-selected',String(active));$(id).tabIndex=active?0:-1;}
   $('preview').dataset.mode=mode;$('clockObject').hidden=$('clockShadow').hidden=$('measureLine').hidden=mode==='print';
   $('showHandsRow').hidden=mode==='print';$('meshOptions').hidden=mode!=='print';$('previewBadge').textContent=mode==='print'?'Actual print model':'Design preview';
-  $('backView').hidden=mode!=='print';if(mode==='print')meshCamera(meshCameraView);else{$('backView').classList.remove('selected');view();}
+  $('backView').hidden=mode!=='print';$('deskView').hidden=mode!=='print'||!state.deskStand;if(mode==='print')meshCamera(meshCameraView);else{$('backView').classList.remove('selected');$('deskView').classList.remove('selected');view();}
   if(mode==='design'){clearTimeout(meshPreviewTimer);meshPreviewTimer=null;meshPreviewController?.abort();meshPreviewController=null;meshPreviewKey=null;$('meshCanvas').hidden=$('meshState').hidden=true;meshView?.setVisible(false);}
   else scheduleMeshPreview(true);
 }
@@ -781,8 +796,8 @@ $('export').onclick=async()=>{
 };
 const holeFit=new HoleFitDialog({workerURL,getHole:()=>state.hole,isBusy:()=>importPending||restorePending||deletingArtwork||!!exportController||$('hole').value===''||!$('hole').validity.valid,getHeight:()=>{
   const stats=meshStore.peek(geometryKey())?.stats;
-  const extra=flatMechanismBox(state)?0:originalArtwork()?state.svgRelief+(state.markers?.8:0):Math.max(state.texture==='smooth'?0:.4,state.markers?.8:0);
-  return {value:stats?.dimensions[2]??artworkSurfaceHeight(state)+extra+(raisedMechanismBox(state)?state.recessDepth:0),measured:!!stats};
+  const extra=flatFrontOnBed(state)?0:originalArtwork()?state.svgRelief+(state.markers?.8:0):Math.max(state.texture==='smooth'?0:.4,state.markers?.8:0);
+  return {value:stats?.dimensions[2]??artworkSurfaceHeight(state)+extra+(state.deskStand?state.standDepth:raisedMechanismBox(state)?state.recessDepth:0),measured:!!stats};
 },onSelect:hole=>{state.hole=hole;delete $('hole').dataset.editing;render();}});
 const filamentPreview=new FilamentPreview({workerURL,prepareRaster:prepareFilamentRaster,onReady:updateMeshAppearance,onColorChange:(source,color,final)=>{
   const overrides={...state.bambuColors};if(source===color.toUpperCase())delete overrides[source];else overrides[source]=color;

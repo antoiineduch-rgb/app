@@ -67,6 +67,9 @@ jobs:
       - name: Test guided setup, print review, and 3D filament colors
         run: npm run test:guided-studio
 
+      - name: Test integrated desk stands and upright inspection
+        run: npm run test:desk-stand
+
       - name: Build Windows installer
         run: npm run dist:win
 

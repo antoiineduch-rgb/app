@@ -1,6 +1,8 @@
 import { Scene,Color,PerspectiveCamera,WebGLRenderer,BufferAttribute,BufferGeometry,Mesh,MeshStandardMaterial,HemisphereLight,DirectionalLight,LineSegments,LineBasicMaterial,PlaneGeometry,Texture,DataTexture,RGBAFormat,SRGBColorSpace,DoubleSide,Vector3,ACESFilmicToneMapping,PCFSoftShadowMap } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import {artworkPixel,paintedTriangle,flatMechanismBox} from './artwork-surface.js';
+import {artworkPixel,paintedTriangle,flatFrontOnBed} from './artwork-surface.js';
+import {standPose} from './stand-settings.js';
+import {artworkSurfaceHeight} from './svg-details.js';
 
 // Loaded only when the user requests print inspection. Render on interaction,
 // resize, or model changes; an idle studio does not run an animation loop.
@@ -33,7 +35,8 @@ export class PrintView{
   setVisible(visible){if(this.visible===visible)return;this.visible=visible;if(visible)this.resize();}
   async setModel(result,settings,{signal}={}){
     signal?.throwIfAborted();
-    this.faceDown=flatMechanismBox(settings);
+    this.faceDown=flatFrontOnBed(settings);
+    this.deskPose=settings.deskStand?standPose(settings,-result.stats.max[1],artworkSurfaceHeight(settings)):null;
     const sequence=++this.sequence,view=new DataView(result.stlBuffer),count=view.getUint32(80,true);
     const positions=new Float32Array(count*9),normals=new Float32Array(count*9),uv=new Float32Array(count*6),groups=[];
     const texture=result.artwork?.texture,surface=texture||result.artwork?.surface;
@@ -98,10 +101,16 @@ export class PrintView{
     this.bed=[plane,grid];for(const object of this.bed){object.visible=visible&&this.viewMode!==(this.faceDown?'front':'back');this.scene.add(object);}this.render();
   }
   setView(view){
+    if(view==='desk'&&!this.deskPose)view='angle';
     this.viewMode=view;for(const object of this.bed||[])object.visible=this.plateVisible&&view!==(this.faceDown?'front':'back');
     const distance=(this.span||200)*1.65;
     this.controls.target.set(0,0,0);
-    this.camera.position.copy(view==='front'?new Vector3(0,-.001,this.faceDown?-distance:distance):view==='back'?new Vector3(distance*.15,-distance*.45,(this.faceDown?1:-1)*distance*.9):new Vector3(distance*.22,-distance*.65,distance*.82));
+    if(this.model){this.model.rotation.set(0,0,0);this.model.position.set(0,0,0);}
+    if(view==='desk'){
+      const pose=this.deskPose;this.model.rotation.x=pose.rotation;this.model.position.set(0,pose.y,pose.z);
+      this.controls.target.set(0,0,(this.span||200)*.43);this.camera.position.copy(this.controls.target).add(new Vector3(distance*.75,distance*.9,distance*.4));
+    }else this.camera.position.copy(view==='front'?new Vector3(0,-.001,this.faceDown?-distance:distance):view==='back'?new Vector3(distance*.15,-distance*.45,(this.faceDown?1:-1)*distance*.9):new Vector3(distance*.22,-distance*.65,distance*.82));
+    this.renderer.shadowMap.needsUpdate=true;this.canvas.dataset.view=view;
     this.controls.update();this.render();
   }
   zoom(factor){const offset=this.camera.position.clone().sub(this.controls.target);offset.setLength(Math.max(this.controls.minDistance,Math.min(this.controls.maxDistance,offset.length()*factor)));this.camera.position.copy(this.controls.target).add(offset);this.controls.update();this.render();}

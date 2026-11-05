@@ -92,7 +92,9 @@ export function extrudeLayers(input) {
   const layers=input.map(layer=>{
     if(!Number.isFinite(layer.height)||layer.height<=previous)throw new RangeError('Layer heights must be positive and increasing.');
     previous=layer.height;
-    return {height:Math.fround(layer.height),polygons:normalize(layer.polygons),closeUnderside:layer.closeUnderside===true};
+    const polygons=normalize(layer.polygons),topPolygons=layer.topPolygons?normalize(layer.topPolygons):polygons;
+    if(polygons.length!==topPolygons.length||polygons.some((p,i)=>p.length!==topPolygons[i].length||p.some((ring,j)=>ring.length!==topPolygons[i][j].length)))throw new RangeError('Sloped layers must keep matching polygon vertices.');
+    return {height:Math.fround(layer.height),polygons,topPolygons,closeUnderside:layer.closeUnderside===true};
   });
   if(!layers[0].polygons.length)throw new RangeError('The clock face has no printable area.');
   const vertices=[],vertexIds=new Map(),xyPoints=new Map(),xyCells=new Map(),triangles=[];
@@ -139,13 +141,13 @@ export function extrudeLayers(input) {
   }
   cap(layers[0].polygons,0,false);
   for(let i=0;i<layers.length;i++) {
-    const {polygons,height}=layers[i],low=i?layers[i-1].height:0,next=layers[i+1]?.polygons;
-    if(i&&layers[i].closeUnderside)cap(normalize(polygonClipping.difference(polygons,layers[i-1].polygons)),low,false);
-    const exposed=next?.length?normalize(polygonClipping.difference(polygons,next)):polygons;
+    const {polygons,topPolygons,height}=layers[i],low=i?layers[i-1].height:0,next=layers[i+1]?.polygons;
+    if(i&&layers[i].closeUnderside)cap(normalize(polygonClipping.difference(polygons,layers[i-1].topPolygons)),low,false);
+    const exposed=next?.length?normalize(polygonClipping.difference(topPolygons,next)):topPolygons;
     cap(exposed,height,true);
-    for(const polygon of polygons)for(const ring of polygon)for(let j=0;j<ring.length;j++) {
-      const a=ring[j],b=ring[(j+1)%ring.length];
-      const al=vertex(a[0],a[1],low),bl=vertex(b[0],b[1],low),ah=vertex(a[0],a[1],height),bh=vertex(b[0],b[1],height);
+    for(let p=0;p<polygons.length;p++)for(let r=0;r<polygons[p].length;r++)for(let j=0;j<polygons[p][r].length;j++) {
+      const ring=polygons[p][r],upper=topPolygons[p][r],a=ring[j],b=ring[(j+1)%ring.length],c=upper[j],d=upper[(j+1)%ring.length];
+      const al=vertex(a[0],a[1],low),bl=vertex(b[0],b[1],low),ah=vertex(c[0],c[1],height),bh=vertex(d[0],d[1],height);
       triangle(al,bl,bh);triangle(al,bh,ah);
     }
   }

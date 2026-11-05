@@ -40,6 +40,11 @@ test('a polygon extrusion is closed, outward-wound and has exact volume',()=>{
   const result=inspect(extrudeLayers([{height:3,polygons:rectangle(-10,-5,10,5)}]));
   assertClosed(result);assert.equal(result.volume,600);assert.equal(result.count,12);
 });
+test('a tapered support has smooth sloped walls and closes against its plate',()=>{
+  const result=inspect(extrudeLayers([{height:3,polygons:rectangle(-20,-20,20,20)},{height:13,polygons:rectangle(-10,-10,10,10),topPolygons:rectangle(-5,-5,5,5)}]));
+  assertClosed(result);assert.ok(Math.abs(result.volume-(4800+7000/3))<.001);assert.ok(result.count<80,'a taper uses actual planes rather than staircase slices');
+  assert.throws(()=>extrudeLayers([{height:5,polygons:rectangle(-10,-10,10,10),topPolygons:[]}]),/matching polygon vertices/);
+});
 
 test('circular shaft and face contours preserve a closed annular solid',()=>{
   const polygons=[[circle(20),circle(4).reverse()]],result=inspect(extrudeLayers([{height:3,polygons}]));

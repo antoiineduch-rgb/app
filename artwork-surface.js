@@ -1,10 +1,11 @@
 import {artworkSurfaceHeight} from './svg-details.js';
 export const raisedMechanismBox=settings=>settings.mechanismRecess===true&&settings.mechanismMount==='box';
 export const flatMechanismBox=settings=>raisedMechanismBox(settings)&&settings.mechanismFlatFront!==false;
+export const flatFrontOnBed=settings=>flatMechanismBox(settings)||settings.deskStand===true;
 
 // Shared by the viewer and both exporters, including face-down artwork.
 export function artworkPlacement(settings,frame){
-  const flat=flatMechanismBox(settings);
+  const flat=flatFrontOnBed(settings);
   return {frame:flat?{...frame,flipY:true}:frame,thickness:artworkSurfaceHeight(settings)+(raisedMechanismBox(settings)&&!flat?(settings.recessDepth??5.5):0),...(flat?{side:'bottom'}:{})};
 }
 export function artworkPixel(point,frame){

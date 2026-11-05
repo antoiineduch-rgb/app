@@ -1,8 +1,8 @@
 import clipping from 'polygon-clipping';
 import {artworkSurfaceHeight} from './svg-details.js';
 import {recessDimensions,movementRectangle} from './mechanism-recess.js';
-import {flatMechanismBox} from './artwork-surface.js';
-export {raisedMechanismBox,flatMechanismBox} from './artwork-surface.js';
+import {flatFrontOnBed} from './artwork-surface.js';
+export {raisedMechanismBox,flatMechanismBox,flatFrontOnBed} from './artwork-surface.js';
 
 export function boxDimensions(settings){
   let dimensions;
@@ -23,7 +23,7 @@ export function withMechanismBox(layers,settings,shaft){
   if(area(clipping.difference(outer,filled))>1e-5)throw Error('Rear box: the movement box needs a solid clock face beneath it. Add a round backing or reduce the movement dimensions.');
   const walls=clipping.difference(outer,inside);
   if(area(clipping.intersection(walls,[[shaft]]))>1e-5)throw Error('Rear box: the movement opening must be large enough to keep the shaft hole clear. Increase the movement width or height.');
-  if(flatMechanismBox(settings)){
+  if(flatFrontOnBed(settings)){
     const face=artworkSurfaceHeight(settings);
     // A proper half-turn about X keeps lettering readable on the underside.
     // A uniform face also supports the full round backing from the first layer.

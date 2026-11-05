@@ -2095,7 +2095,7 @@
   });
 
   // mesh.js
-  var import_polygon_clipping6 = __toESM(require_polygon_clipping_umd(), 1);
+  var import_polygon_clipping7 = __toESM(require_polygon_clipping_umd(), 1);
 
   // contours.js
   var CONTOUR_SEGMENTS = [
@@ -2162,9 +2162,9 @@
     return rings;
   }
   function contourArea(ring) {
-    let area5 = 0;
-    for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) area5 += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
-    return area5 / 2;
+    let area6 = 0;
+    for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) area6 += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
+    return area6 / 2;
   }
   function pointSegmentDistanceSquared(point, a, b) {
     const dx = b[0] - a[0], dy = b[1] - a[1];
@@ -2826,7 +2826,9 @@
     const layers = input.map((layer) => {
       if (!Number.isFinite(layer.height) || layer.height <= previous) throw new RangeError("Layer heights must be positive and increasing.");
       previous = layer.height;
-      return { height: Math.fround(layer.height), polygons: normalize(layer.polygons), closeUnderside: layer.closeUnderside === true };
+      const polygons = normalize(layer.polygons), topPolygons = layer.topPolygons ? normalize(layer.topPolygons) : polygons;
+      if (polygons.length !== topPolygons.length || polygons.some((p, i2) => p.length !== topPolygons[i2].length || p.some((ring, j) => ring.length !== topPolygons[i2][j].length))) throw new RangeError("Sloped layers must keep matching polygon vertices.");
+      return { height: Math.fround(layer.height), polygons, topPolygons, closeUnderside: layer.closeUnderside === true };
     });
     if (!layers[0].polygons.length) throw new RangeError("The clock face has no printable area.");
     const vertices = [], vertexIds = /* @__PURE__ */ new Map(), xyPoints = /* @__PURE__ */ new Map(), xyCells = /* @__PURE__ */ new Map(), triangles = [];
@@ -2886,13 +2888,13 @@
     }
     cap(layers[0].polygons, 0, false);
     for (let i2 = 0; i2 < layers.length; i2++) {
-      const { polygons, height } = layers[i2], low = i2 ? layers[i2 - 1].height : 0, next = layers[i2 + 1]?.polygons;
-      if (i2 && layers[i2].closeUnderside) cap(normalize(import_polygon_clipping.default.difference(polygons, layers[i2 - 1].polygons)), low, false);
-      const exposed = next?.length ? normalize(import_polygon_clipping.default.difference(polygons, next)) : polygons;
+      const { polygons, topPolygons, height } = layers[i2], low = i2 ? layers[i2 - 1].height : 0, next = layers[i2 + 1]?.polygons;
+      if (i2 && layers[i2].closeUnderside) cap(normalize(import_polygon_clipping.default.difference(polygons, layers[i2 - 1].topPolygons)), low, false);
+      const exposed = next?.length ? normalize(import_polygon_clipping.default.difference(topPolygons, next)) : topPolygons;
       cap(exposed, height, true);
-      for (const polygon of polygons) for (const ring of polygon) for (let j = 0; j < ring.length; j++) {
-        const a = ring[j], b = ring[(j + 1) % ring.length];
-        const al = vertex(a[0], a[1], low), bl = vertex(b[0], b[1], low), ah = vertex(a[0], a[1], height), bh = vertex(b[0], b[1], height);
+      for (let p = 0; p < polygons.length; p++) for (let r = 0; r < polygons[p].length; r++) for (let j = 0; j < polygons[p][r].length; j++) {
+        const ring = polygons[p][r], upper = topPolygons[p][r], a = ring[j], b = ring[(j + 1) % ring.length], c = upper[j], d = upper[(j + 1) % ring.length];
+        const al = vertex(a[0], a[1], low), bl = vertex(b[0], b[1], low), ah = vertex(c[0], c[1], height), bh = vertex(d[0], d[1], height);
         triangle(al, bl, bh);
         triangle(al, bh, ah);
       }
@@ -3351,6 +3353,7 @@
   // artwork-surface.js
   var raisedMechanismBox = (settings) => settings.mechanismRecess === true && settings.mechanismMount === "box";
   var flatMechanismBox = (settings) => raisedMechanismBox(settings) && settings.mechanismFlatFront !== false;
+  var flatFrontOnBed = (settings) => flatMechanismBox(settings) || settings.deskStand === true;
   function artworkPixel(point, frame) {
     return [point[0] / frame.scale + frame.cx, frame.cy - (frame.flipY ? -point[1] : point[1]) / frame.scale];
   }
@@ -3383,17 +3386,139 @@
     if (area3(import_polygon_clipping5.default.difference(outer, filled)) > 1e-5) throw Error("Rear box: the movement box needs a solid clock face beneath it. Add a round backing or reduce the movement dimensions.");
     const walls = import_polygon_clipping5.default.difference(outer, inside);
     if (area3(import_polygon_clipping5.default.intersection(walls, [[shaft]])) > 1e-5) throw Error("Rear box: the movement opening must be large enough to keep the shaft hole clear. Increase the movement width or height.");
-    if (flatMechanismBox(settings)) {
+    if (flatFrontOnBed(settings)) {
       const face = artworkSurfaceHeight(settings);
       return [{ height: face, polygons: turnOver(base) }, { height: face + depth, polygons: turnOver(walls) }];
     }
     return [{ height: depth, polygons: walls }, ...layers.map((layer, i2) => ({ ...layer, height: layer.height + depth, ...i2 === 0 ? { closeUnderside: true } : {} }))];
   }
 
+  // desk-stand.js
+  var import_polygon_clipping6 = __toESM(require_polygon_clipping_umd(), 1);
+
+  // stand-settings.js
+  var STAND_RIB = 3.2;
+  function standDimensions(settings) {
+    const width = settings.standWidth ?? 45, depth = settings.standDepth ?? 45, lean = settings.standLean ?? 12;
+    if (![width, depth, lean].every(Number.isFinite) || width < 25 || width > 70 || depth < 25 || depth > 70 || lean < 6 || lean > 20) throw Error("Desk stand: use a width and depth of 25–70 mm and a backward lean of 6–20°.");
+    return { width, depth, lean, rib: STAND_RIB };
+  }
+  function standPose(settings, bottom, face) {
+    const angle = standDimensions(settings).lean * Math.PI / 180;
+    return { rotation: -Math.PI / 2 - angle, y: -bottom * Math.sin(angle) - face * Math.cos(angle), z: -bottom * Math.cos(angle) + face * Math.sin(angle) };
+  }
+
+  // desk-stand.js
+  var snap4 = (value) => Math.round(value * 1e6) / 1e6;
+  var turnOver2 = (polygons) => polygons.map((p) => p.map((r) => r.map(([x2, y]) => [x2, -y]).reverse()));
+  var area4 = (polygons) => polygons.reduce((sum, p) => sum + p.reduce((part, r, i2) => {
+    let a = 0;
+    for (let j = 0; j < r.length - 1; j++) a += r[j][0] * r[j + 1][1] - r[j + 1][0] * r[j][1];
+    return part + (i2 ? -1 : 1) * Math.abs(a / 2);
+  }, 0), 0);
+  function flatStandPlate(layers, settings, shaft) {
+    const face = artworkSurfaceHeight(settings), cut = withMechanismRecess([{ height: face, polygons: layers[0].polygons }], settings, shaft);
+    return cut.map((layer, i2) => ({ height: snap4(face - (i2 ? cut[i2 - 1].height : 0)), polygons: turnOver2(layer.polygons) })).reverse();
+  }
+  function supportShape(width, rib, low, high, centerX = 0) {
+    const x2 = width / 2, points = [[-x2, low], [x2, low], [x2, high], [x2 - rib, high], [x2 - rib, low + rib], [-x2 + rib, low + rib], [-x2 + rib, high], [-x2, high], [-x2, low]];
+    return [points.map(([px, py]) => [snap4(px + centerX), snap4(-py)]).reverse()];
+  }
+  function plateCenter(polygons) {
+    let total = 0, x2 = 0, y = 0;
+    for (const polygon of polygons) for (let r = 0; r < polygon.length; r++) {
+      const ring = polygon[r];
+      let twice = 0, cx = 0, cy = 0;
+      for (let i2 = 0; i2 < ring.length - 1; i2++) {
+        const a = ring[i2], b = ring[i2 + 1], cross2 = a[0] * b[1] - b[0] * a[1];
+        twice += cross2;
+        cx += (a[0] + b[0]) * cross2;
+        cy += (a[1] + b[1]) * cross2;
+      }
+      if (Math.abs(twice) < 1e-8) continue;
+      const weight = (r ? -1 : 1) * Math.abs(twice);
+      total += weight;
+      x2 += weight * cx / (3 * twice);
+      y += weight * cy / (3 * twice);
+    }
+    return [x2 / total, y / total];
+  }
+  function standLayout(layers, settings) {
+    const dimensions = standDimensions(settings), face = artworkSurfaceHeight(settings), foundation = layers.find((layer) => layer.height >= face - 1e-6)?.polygons;
+    if (!foundation?.length) throw Error("Desk stand: the clock needs a solid plate beneath its rear support.");
+    let maxY = -Infinity;
+    for (const polygon of foundation) for (const point of polygon[0]) maxY = Math.max(maxY, point[1]);
+    const bottom = -maxY, low = bottom + dimensions.depth * Math.tan(dimensions.lean * Math.PI / 180);
+    const center = plateCenter(foundation), contacts = foundation.flatMap((p) => p[0].filter((point) => point[1] >= maxY - 0.01).map((point) => point[0])), frontX = (Math.min(...contacts) + Math.max(...contacts)) / 2, angle = dimensions.lean * Math.PI / 180;
+    const centerDepth = -(center[1] + bottom) * Math.sin(angle) - face / 2 * Math.cos(angle), fraction = Math.max(0.1, Math.min(0.9, centerDepth / (dimensions.depth / Math.cos(angle))));
+    const centerX = (center[0] - (1 - fraction) * frontX) / fraction;
+    let limit = -settings.hole / 2 - 2;
+    if (settings.mechanismRecess) {
+      const movementHeight = raisedMechanismBox(settings) ? boxDimensions(settings).outerHeight : recessDimensions(settings).height;
+      limit = Math.min(limit, -movementHeight / 2 - 2);
+    }
+    if (limit - low < dimensions.rib * 2 + 1.2) throw Error("Desk stand: there is not enough space below the mechanism. Use a round backing, reduce stand depth or lean, or increase clock size.");
+    for (let offset = 0; offset <= dimensions.depth * 0.75; offset += 0.5) {
+      const rootLow = low + offset, high = Math.min(rootLow + 28, limit);
+      if (high - rootLow < dimensions.rib * 2 + 1.2) break;
+      const root = [supportShape(dimensions.width, dimensions.rib, rootLow, high, centerX)];
+      if (area4(import_polygon_clipping6.default.difference(root, foundation)) <= 1e-5) return { ...dimensions, face, bottom, low, rootLow, high, centerX, root };
+    }
+    throw Error("Desk stand: its attachment needs solid material near the bottom of the clock. Use a round backing, reduce stand width, or increase its depth or lean.");
+  }
+  function withDeskStand(layers, settings) {
+    if (!settings.deskStand) return layers;
+    const plan = standLayout(layers, settings), { face, depth, width, rib, low, rootLow, high, centerX } = plan, top = face + depth;
+    const shape = (z) => {
+      const t = Math.min(1, Math.max(0, (z - face) / depth));
+      return [supportShape(width, rib, rootLow + (low - rootLow) * t, high + (low + rib * 2 - high) * t, centerX)];
+    };
+    const heights = [.../* @__PURE__ */ new Set([...layers.map((layer) => layer.height), face, top])].sort((a, b) => a - b), result = [];
+    let previous = 0;
+    for (const height of heights) {
+      const original = layers.find((layer) => layer.height >= height - 1e-6), clock = original?.polygons || [], active = previous >= face - 1e-6 && height <= top + 1e-6;
+      const polygons = active ? [...clock, ...shape(previous)] : clock;
+      result.push({ height, polygons, ...active ? { topPolygons: [...clock, ...shape(height)] } : {}, ...original?.closeUnderside ? { closeUnderside: true } : {} });
+      previous = height;
+    }
+    return result;
+  }
+  function validateStandBalance(buffer, settings) {
+    const view = new DataView(buffer), count = view.getUint32(80, true), face = artworkSurfaceHeight(settings), foot = face + standDimensions(settings).depth, candidates = [], moment = [0, 0, 0];
+    let volume = 0, maxY = -Infinity;
+    for (let i2 = 0; i2 < count; i2++) {
+      const p = [0, 1, 2].map((j) => [0, 1, 2].map((k) => view.getFloat32(96 + i2 * 50 + j * 12 + k * 4, true))), [a, b, c] = p;
+      const v = (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+      volume += v;
+      for (let k = 0; k < 3; k++) moment[k] += v * (a[k] + b[k] + c[k]) / 4;
+      for (const point of p) {
+        maxY = Math.max(maxY, point[1]);
+        if (Math.abs(point[2] - face) < 1e-4 || Math.abs(point[2] - foot) < 1e-4) candidates.push(point);
+      }
+    }
+    const pose = standPose(settings, -maxY, face), transform = (p) => [p[0], p[1] * Math.cos(pose.rotation) - p[2] * Math.sin(pose.rotation) + pose.y, p[1] * Math.sin(pose.rotation) + p[2] * Math.cos(pose.rotation) + pose.z];
+    const center = transform(moment.map((v) => v / volume)), unique = /* @__PURE__ */ new Map();
+    for (const p of candidates) {
+      const q = transform(p);
+      if (Math.abs(q[2]) < 0.02) unique.set(`${snap4(q[0])},${snap4(q[1])}`, [q[0], q[1]]);
+    }
+    const points = [...unique.values()].sort((a, b) => a[0] - b[0] || a[1] - b[1]), cross2 = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const half = (values) => {
+      const result = [];
+      for (const p of values) {
+        while (result.length > 1 && cross2(result.at(-2), result.at(-1), p) <= 0) result.pop();
+        result.push(p);
+      }
+      return result;
+    };
+    const lower = half(points), upper = half([...points].reverse()), hull = [...lower.slice(0, -1), ...upper.slice(0, -1)];
+    if (hull.length < 3 || hull.some((p, i2) => cross2(p, hull[(i2 + 1) % hull.length], center) < -1e-5)) throw Error("Desk stand: the model’s center of mass lies outside its support. Increase stand depth or width, reduce backward lean, or use a round backing for uneven artwork.");
+  }
+
   // mesh.js
   var CURVE_ERROR = 0.02;
-  var snap4 = (value) => Math.round(value * 1e6) / 1e6;
-  function area4(ring) {
+  var snap5 = (value) => Math.round(value * 1e6) / 1e6;
+  function area5(ring) {
     let sum = 0;
     for (let i2 = 0, j = ring.length - 1; i2 < ring.length; j = i2++) sum += ring[j][0] * ring[i2][1] - ring[i2][0] * ring[j][1];
     return sum / 2;
@@ -3407,8 +3532,8 @@
     return inside;
   }
   function closed(ring, positive = true) {
-    if (area4(ring) > 0 !== positive) ring.reverse();
-    const points = ring.map(([x2, y]) => [snap4(x2), snap4(y)]);
+    if (area5(ring) > 0 !== positive) ring.reverse();
+    const points = ring.map(([x2, y]) => [snap5(x2), snap5(y)]);
     return [...points, points[0]];
   }
   function silhouette(alpha, n, diameter, frame = null, threshold = 127.5) {
@@ -3429,7 +3554,7 @@
     frame ||= { scale: diameter / span, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
     const { scale, cx, cy } = frame;
     if (!Number.isFinite(scale) || span <= 0) throw Error("The SVG outline could not be measured.");
-    const rings = source.map((ring) => simplifyRing(ring, CURVE_ERROR / scale).map(([x2, y]) => [(x2 - cx) * scale, (cy - y) * scale])).filter((ring) => ring.length >= 3 && Math.abs(area4(ring)) > 1e-6).map((ring) => ({ ring, size: Math.abs(area4(ring)), depth: 0, parent: null, polygon: null })).sort((a, b) => b.size - a.size);
+    const rings = source.map((ring) => simplifyRing(ring, CURVE_ERROR / scale).map(([x2, y]) => [(x2 - cx) * scale, (cy - y) * scale])).filter((ring) => ring.length >= 3 && Math.abs(area5(ring)) > 1e-6).map((ring) => ({ ring, size: Math.abs(area5(ring)), depth: 0, parent: null, polygon: null })).sort((a, b) => b.size - a.size);
     const result = [];
     for (let i2 = 0; i2 < rings.length; i2++) {
       const entry = rings[i2];
@@ -3464,7 +3589,7 @@
     const count = Math.ceil(Math.max(minimum, Math.ceil(Math.PI / Math.acos(Math.max(-1, 1 - error / radius)))) / 4) * 4;
     return Array.from({ length: count + 1 }, (_, i2) => {
       const a = i2 % count / count * Math.PI * 2;
-      return [snap4(radius * Math.cos(a)), snap4(radius * Math.sin(a))];
+      return [snap5(radius * Math.cos(a)), snap5(radius * Math.sin(a))];
     });
   }
   function shaftOpening(diameter) {
@@ -3504,7 +3629,7 @@
         strips.push([closed(ring)]);
       }
     }
-    return import_polygon_clipping6.default.union(...strips);
+    return import_polygon_clipping7.default.union(...strips);
   }
   function buildClockLayers(alpha, n, settings, progress = () => {
   }, artwork = null) {
@@ -3515,26 +3640,26 @@
     const { polygons: outline, frame } = silhouette(alpha, n, diameter, backed ? artworkFrame(alpha, n, diameter, settings) : null);
     const opening = shaftOpening(hole), automatic = autoHourFit(settings), layout = automatic ? fitHourLayout(alpha, n, frame, settings) : null, fitted = automatic ? fittedHourPolygons(settings, layout) : [];
     if (automatic && layout.missing.length) throw Error("Some hours cannot fit inside this SVG as complete labels. Add a round backing for all 12 hours, reduce the number size, or choose manual placement.");
-    let base = import_polygon_clipping6.default.difference(outline, [[opening]]);
+    let base = import_polygon_clipping7.default.difference(outline, [[opening]]);
     if (!base.length) throw Error("The center opening covers the entire clock face.");
-    if (backed && fitted.length) base = import_polygon_clipping6.default.union(base, fitted);
+    if (backed && fitted.length) base = import_polygon_clipping7.default.union(base, fitted);
     const layers = backed ? [
-      { height: backingDepth(settings), polygons: import_polygon_clipping6.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
+      { height: backingDepth(settings), polygons: import_polygon_clipping7.default.difference([[circle(diameter / 2, CURVE_ERROR, 128)]], [[opening]]) },
       { height: thickness, polygons: base }
     ] : [{ height: thickness, polygons: base }];
     progress("details");
     const detailed = !!artwork?.rgba && settings.design === "custom" && settings.svgDetail !== "silhouette";
-    const finish = () => raisedMechanismBox(settings) ? withMechanismBox(layers, settings, opening) : withMechanismRecess(layers, settings, opening);
-    if (flatMechanismBox(settings)) return finish();
+    const finish = () => withDeskStand(raisedMechanismBox(settings) ? withMechanismBox(layers, settings, opening) : settings.deskStand ? flatStandPlate(layers, settings, opening) : withMechanismRecess(layers, settings, opening), settings);
+    if (flatFrontOnBed(settings)) return finish();
     if (texture === "smooth" && !markers && !detailed) return finish();
     const rimPixels = Math.max(1, Math.ceil(0.3 / frame.scale));
     const detailOutline = silhouette(insetAlpha(alpha, n, rimPixels), n, diameter, frame).polygons;
-    const detailRegion = detailOutline.length ? import_polygon_clipping6.default.difference(detailOutline, [[circle(hole / 2 + 0.3, 1e-3, 128)]]) : [];
+    const detailRegion = detailOutline.length ? import_polygon_clipping7.default.difference(detailOutline, [[circle(hole / 2 + 0.3, 1e-3, 128)]]) : [];
     const useNumerals = ["arabic", "roman"].includes(settings.hourStyle);
     const markerShapes = markers ? useNumerals ? hourNumeralPolygons(settings) : markerPolygons(diameter) : [];
     const markerOutline = markers && !automatic ? silhouette(insetAlpha(alpha, n, rimPixels + 1), n, diameter, frame).polygons : [];
-    const markerRegion = markerOutline.length ? import_polygon_clipping6.default.difference(markerOutline, [[circle(hole / 2 + 0.3 + frame.scale, 1e-3, 128)]]) : [];
-    const ticks = automatic ? fitted : markers && markerRegion.length ? import_polygon_clipping6.default.intersection(markerRegion, markerShapes) : [];
+    const markerRegion = markerOutline.length ? import_polygon_clipping7.default.difference(markerOutline, [[circle(hole / 2 + 0.3 + frame.scale, 1e-3, 128)]]) : [];
+    const ticks = automatic ? fitted : markers && markerRegion.length ? import_polygon_clipping7.default.intersection(markerRegion, markerShapes) : [];
     if (detailed) {
       const height = settings.svgRelief ?? 0.8;
       if (!Number.isFinite(height) || height < 0 || height > 2) throw Error("SVG relief must be between 0 and 2 mm.");
@@ -3544,9 +3669,9 @@
         const steps = Math.max(1, Math.min(8, Math.round(height / 0.2)));
         for (let level = 1; level <= steps; level++) {
           const region = silhouette(relief, n, diameter, frame, (level - 0.5) * 255 / steps).polygons;
-          const detail = region.length && previous.length ? import_polygon_clipping6.default.intersection(previous, region) : [];
+          const detail = region.length && previous.length ? import_polygon_clipping7.default.intersection(previous, region) : [];
           previous = detail;
-          const raised = ticks.length ? detail.length ? import_polygon_clipping6.default.union(detail, ticks) : ticks : detail;
+          const raised = ticks.length ? detail.length ? import_polygon_clipping7.default.union(detail, ticks) : ticks : detail;
           if (raised.length) {
             top = thickness + height * level / steps;
             layers.push({ height: top, polygons: raised });
@@ -3560,14 +3685,14 @@
       let pattern = texture === "ripple" ? ripplePolygons(diameter) : hatchPolygons(diameter);
       let first = [];
       if (useNumerals && markers) {
-        pattern = import_polygon_clipping6.default.difference(pattern, automatic ? fittedHourPolygons(settings, layout, 0.6) : hourNumeralPolygons(settings, 0.6));
-        const textureArea = detailRegion.length ? import_polygon_clipping6.default.intersection(detailRegion, pattern) : [];
-        first = textureArea.length && ticks.length ? import_polygon_clipping6.default.union(textureArea, ticks) : ticks.length ? ticks : textureArea;
+        pattern = import_polygon_clipping7.default.difference(pattern, automatic ? fittedHourPolygons(settings, layout, 0.6) : hourNumeralPolygons(settings, 0.6));
+        const textureArea = detailRegion.length ? import_polygon_clipping7.default.intersection(detailRegion, pattern) : [];
+        first = textureArea.length && ticks.length ? import_polygon_clipping7.default.union(textureArea, ticks) : ticks.length ? ticks : textureArea;
       } else {
-        const foundation = markers ? import_polygon_clipping6.default.union(pattern, markerPolygons(diameter, 0.15)) : pattern;
-        first = detailRegion.length ? import_polygon_clipping6.default.intersection(detailRegion, foundation) : [];
+        const foundation = markers ? import_polygon_clipping7.default.union(pattern, markerPolygons(diameter, 0.15)) : pattern;
+        first = detailRegion.length ? import_polygon_clipping7.default.intersection(detailRegion, foundation) : [];
       }
-      if (automatic && ticks.length) first = first.length ? import_polygon_clipping6.default.union(first, ticks) : ticks;
+      if (automatic && ticks.length) first = first.length ? import_polygon_clipping7.default.union(first, ticks) : ticks;
       if (first.length) layers.push({ height: thickness + 0.4, polygons: first });
     }
     if (ticks.length) layers.push({ height: thickness + 0.8, polygons: ticks });
@@ -3577,7 +3702,9 @@
   }, artwork = null) {
     const layers = buildClockLayers(alpha, n, settings, progress, artwork);
     progress("mesh");
-    return extrudeLayers(layers);
+    const buffer = extrudeLayers(layers);
+    if (settings.deskStand) validateStandBalance(buffer, settings);
+    return buffer;
   }
 
   // node_modules/fflate/esm/browser.js
@@ -4680,7 +4807,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
   }
 
   // hole-fit.js
-  var import_polygon_clipping7 = __toESM(require_polygon_clipping_umd(), 1);
+  var import_polygon_clipping8 = __toESM(require_polygon_clipping_umd(), 1);
   var round = (value) => Math.round(value * 1e6) / 1e6;
   var DIGITS = ["abcdef", "bc", "abdeg", "abcdg", "bcfg", "acdfg", "acdefg", "abc", "abcdefg", "abcdfg"];
   var SEGMENTS = { a: [0.25, 3.6, 2.25, 4.2], b: [1.9, 1.9, 2.5, 4], c: [1.9, 0.2, 2.5, 2.3], d: [0.25, 0, 2.25, 0.6], e: [0, 0.2, 0.6, 2.3], f: [0, 1.9, 0.6, 4], g: [0.25, 1.8, 2.25, 2.4] };
@@ -4695,7 +4822,7 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
       }
       offset += (char === "." ? 0.7 : 2.5) + 0.8;
     }
-    return import_polygon_clipping7.default.union(...rectangles);
+    return import_polygon_clipping8.default.union(...rectangles);
   }
   function roundedRectangle(width, height) {
     const radius = 3, ring = [];
@@ -4711,12 +4838,12 @@ ${artwork ? '<Default Extension="png" ContentType="image/png"/>\n' : ""}<Overrid
     const sizes = Array.from({ length: 5 }, (_, i2) => (first + i2 * 2) / 10), largest = sizes.at(-1), cell = largest + 6, width = round(cell * 5 + 8), depth = round(largest + 14), thickness = 2, relief = 0.6;
     const holes = sizes.map((diameter, i2) => ({ diameter, x: round(-width / 2 + 4 + cell * (i2 + 0.5)), y: 3.5 }));
     const outline = roundedRectangle(width, depth), openings = holes.map(({ diameter, x: x2, y }) => [shaftOpening(diameter).map(([px, py]) => [round(px + x2), round(py + y)])]);
-    const base = import_polygon_clipping7.default.difference([[outline]], ...openings);
+    const base = import_polygon_clipping8.default.difference([[outline]], ...openings);
     const labels = holes.map(({ diameter, x: x2 }) => ({ text: diameter.toFixed(1), polygons: labelPolygons(diameter.toFixed(1), x2, -depth / 2 + 4) }));
     return { center, sizes, width, depth, thickness, relief, holes, base, labels };
   }
   function makeFitTestSTL(center) {
-    const plan = fitTestPlan(center), letters = import_polygon_clipping7.default.union(...plan.labels.map((label) => label.polygons));
+    const plan = fitTestPlan(center), letters = import_polygon_clipping8.default.union(...plan.labels.map((label) => label.polygons));
     return extrudeLayers([{ height: plan.thickness, polygons: plan.base }, { height: plan.thickness + plan.relief, polygons: letters }]);
   }
 
