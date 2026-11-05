@@ -13,7 +13,16 @@ let mainWindow;
 function editorAction(id,window=mainWindow){return window?.webContents.executeJavaScript(`document.getElementById(${JSON.stringify(id)})?.click()`,true).catch(()=>{});}
 function editHistory(action,window=mainWindow){
   if(!window)return;
-  window.webContents.executeJavaScript(`(() => { const active=document.activeElement; if(active?.matches('textarea,[contenteditable="true"],input:not([type="range"]):not([type="checkbox"])'))return false; document.getElementById(${JSON.stringify(action)})?.click(); return true; })()`)
+  window.webContents.executeJavaScript(`(() => {
+    const active=document.activeElement;
+    if(active?.matches('textarea,[contenteditable="true"],input:not([type="range"]):not([type="checkbox"])'))return false;
+    if(document.getElementById('projectsDialog')?.open){
+      const restore=document.getElementById('undoProjectDelete');
+      if(${JSON.stringify(action)}==='undo'&&restore&&!restore.hidden&&!restore.disabled)restore.click();
+      return true;
+    }
+    document.getElementById(${JSON.stringify(action)})?.click();return true;
+  })()`)
     .then(handled=>{if(!handled&&!window.isDestroyed())window.webContents[action]();}).catch(()=>{});
 }
 

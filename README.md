@@ -37,6 +37,14 @@ Production builds minify all three browser bundles while preserving license noti
 
 Name your project and use **Save project** to download a portable `.clock` file containing all settings, the original SVG, and its orientation. **Open project** restores it in the browser or Windows app, including on another device. This is an editable project backup, separate from STL/3MF print exports. Imported project files are limited to 12 MB, embedded SVGs to 5 MB. Invalid files leave the current design intact. Restored SVGs pass through the same sanitizer as direct imports, and local-save failures are shown honestly while the project remains usable for the session.
 
+**My projects** keeps up to 20 complete saved copies in this app. Name the copy and choose **Save current design** to retain its original SVG, orientation, dimensions, hours, mechanism fit, desk stand and spool colors. The editor keeps its current name and design; later edits leave the saved copy available. Save another copy after changes. Saving exactly the same named design again reuses its entry. The library shows front-view thumbnails, size, file format, rear accessories and save dates, with search by project or SVG name.
+
+**Open** restores a saved clock through the same validation and SVG preparation as a `.clock` file. Saved copies retain their own SVG source even after it is removed from Recent SVGs. **Backup** downloads the selected saved copy without replacing the current editor. **Remove** deletes a library copy; **Undo removal** restores the last removal until another save or removal. The full library never discards clocks automatically. Library writes update project data and metadata together, and browsing reads thumbnails and metadata instead of loading every SVG. Failed or unavailable device storage leaves the current design usable, with **Backup current design** and a retry available. Copies belong to the current app/browser profile; use `.clock` backups to transfer designs or keep an external copy.
+
+Ctrl/Cmd+Z in the library restores its last removal; text fields retain their normal text undo. Library undo preserves the clock currently open in the editor.
+
+**Find a setting** at the top of the customization panel, or **Ctrl/Cmd+K**, searches size, SVG, hours, movement, stand, colors and print controls. It opens the relevant section, focuses the control and briefly highlights it. For inactive features it takes you to their toggle or prerequisite, with a short explanation. Navigation preserves the design settings. Arrow keys select a result, Enter takes you there, and Esc closes the results. Common French terms such as “chiffres”, “mécanisme” and “dégagement” are also recognized. Ctrl/Cmd+K in My projects focuses its saved-clock search.
+
 Undo/redo stores up to 60 design states, including imported artwork and reset operations. Slider movements are grouped into a single undo step. Use the toolbar, Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, or Ctrl+Y; text fields keep their normal text-editing undo. Ctrl/Cmd+S saves a project and Ctrl/Cmd+O opens one. The Windows File and Edit menus offer the same project and history actions. History stays in the current session; the latest design is saved locally and project files provide portable backups. Reset keeps the saved SVG library.
 
 Set the diameter from 100 to 300 mm in 1 mm steps using the slider or exact-size field. **Show hands** controls the illustrative hands in Design view; they never appear in print files. The welcome card can be dismissed, tabs support arrow-key navigation, and the workspace adapts to mobile screens.
@@ -101,8 +109,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.16.0-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.16.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.17.0-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.17.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
@@ -159,6 +167,8 @@ Run `npm run test:svg-details` for original SVG color, gradient, pattern, fine-l
 Run `npm run test:studio` for project round-trips and native downloads, undo/redo and native menus, exact-size validation, genuine rendered 3D pixels, shared preview/export builds, build-plate fit, disconnected-part detection, cancellation during texture loading, mobile layout, and graphics fallback. It also checks real downloads from the quick print choices, file-specific instructions, repeat downloads, saved A1/custom plate settings, and actual shortcut navigation at 320 and 390 pixels. The test uses software WebGL for deterministic graphics; the shipped application uses the device's normal graphics settings. On display-free Linux, run `npx electron --no-sandbox --ozone-platform=headless tests/studio.electron.cjs` after building, without `--disable-gpu`.
 
 Run `npm run test:workspace` for simultaneous invalid/valid measurement edits and actual exported dimensions, expanded Design and WebGL views, exact STL preservation without GPU or mesh rebuilds, keyboard controls, focus and scroll restoration, complete model framing at 320 and 390 pixels, sandboxed native save receipts, renamed files, real cancellation and interrupted disk writes, and original-file retries after later edits. Use the same headless software WebGL flags as `test:studio` on display-free Linux.
+
+Run `npm run test:projects` for real IndexedDB concurrency, exact deduplication and hash-collision safety, a full library without eviction, atomic quota-failure rollback, complete SVG clocks reopened after recent-artwork removal and reload, byte-identical colored 3MF, reversible removal, corrupt-project rejection, newer-edit precedence during delayed saves/opens, native backups of saved copies, storage fallback/recovery, and mobile layouts. It also tests keyboard setting discovery and hidden-control navigation without changing design parameters. Use the same software WebGL headless flags as `test:studio`.
 
 Run `npm run test:bambu` for real desktop A1 exports, all four source colors, native sub-facet paint, exact STL geometry, color limits, back-color choices, and worker fallback. It also compares actual color-preview pixels with exported palettes, checks merged filament assignments, undo/reset/project restoration, analysis reuse, superseded jobs, and usable color pickers at 320 and 390 pixels. On display-free Linux use the same headless flags as the other SVG suites.
 

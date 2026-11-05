@@ -76,6 +76,9 @@ jobs:
       - name: Test expanded previews, precise editing, and actual native save outcomes
         run: npm run test:workspace
 
+      - name: Test saved clocks, storage recovery, and setting navigation
+        run: npm run test:projects
+
       - name: Build Windows installer
         run: npm run dist:win
 
