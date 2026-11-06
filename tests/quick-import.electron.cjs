@@ -9,18 +9,26 @@ const {unzipSync,strFromU8}=require('fflate');
 const profile=mkdtempSync(join(tmpdir(),'clock-quick-import-'));app.setPath('userData',profile);
 app.commandLine.appendSwitch('enable-unsafe-swiftshader');app.commandLine.appendSwitch('use-gl','angle');app.commandLine.appendSwitch('use-angle','swiftshader');
 let done=false;const watchdog=setTimeout(()=>finish(Error('Quick import checks exceeded 180 seconds.')),180000);
-function finish(error){if(done)return;done=true;clearTimeout(watchdog);if(error)console.error(error.stack||error);else console.log('All file drop, clipboard SVG and safe import checks passed.');app.exit(error?1:0);}
+function finish(error){
+  if(done)return;done=true;clearTimeout(watchdog);
+  if(error){
+    const detail=String(error.stack||error);console.error(detail);
+    if(process.env.GITHUB_ACTIONS==='true')console.error('::error title=Clock import test failed::'+detail.replace(/%/g,'%25').replace(/\r/g,'%0D').replace(/\n/g,'%0A'));
+  }else console.log('All file drop, clipboard SVG and safe import checks passed.');
+  app.exit(error?1:0);
+}
 app.on('quit',()=>{try{rmSync(profile,{recursive:true,force:true});}catch{}});process.on('uncaughtException',finish);process.on('unhandledRejection',finish);
 app.once('browser-window-created',(_,window)=>window.webContents.once('did-finish-load',()=>run(window).then(()=>finish(),finish)));
 
 async function run(window){
   const evaluate=(fn,...args)=>window.webContents.executeJavaScript(`(${fn.toString()})(${args.map(value=>JSON.stringify(value)).join(',')})`,true).catch(error=>{throw Error(error.message+' in '+fn.toString().slice(0,180));});
   const click=id=>evaluate(id=>document.getElementById(id).click(),id);
-  const wait=async(fn,label,...args)=>{const end=Date.now()+30000;while(Date.now()<end){const value=await evaluate(fn,...args);if(value)return value;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label+'; '+await evaluate(()=>document.getElementById('uploadStatus').textContent+'; '+document.getElementById('pasteSvgStatus').textContent+'; '+document.getElementById('toast').textContent));};
+  const wait=async(fn,label,...args)=>{const end=Date.now()+30000;while(Date.now()<end){const value=await evaluate(fn,...args);if(value)return value;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label+'; '+await evaluate(()=>JSON.stringify({upload:document.getElementById('uploadStatus').textContent,paste:document.getElementById('pasteSvgStatus').textContent,files:document.getElementById('quickImportStatus').textContent,toast:document.getElementById('toast').textContent,focus:document.activeElement?.id,drag:window.__importDragEvents})));};
   const ready=name=>wait(name=>!document.getElementById('saveProject').disabled&&document.getElementById('artworkName').textContent===name,'artwork '+name,name);
   const set=(id,value,event='input')=>evaluate((id,value,event)=>{const e=document.getElementById(id);if(e.type==='checkbox')e.checked=value;else e.value=value;e.dispatchEvent(new Event(event,{bubbles:true}));},id,value,event);
   async function hooks(){await evaluate(()=>{
     window.__importErrors=[];window.addEventListener('error',e=>window.__importErrors.push(e.message));window.addEventListener('unhandledrejection',e=>window.__importErrors.push(String(e.reason)));
+    window.__importDragEvents=[];for(const type of ['dragenter','dragover','drop'])document.addEventListener(type,event=>{window.__importDragEvents.push({type,files:Array.from(event.dataTransfer?.files||[],file=>file.name)});window.__importDragEvents=window.__importDragEvents.slice(-6);});
     window.__importFiles=[];window.__importBlobs=new Map();const create=URL.createObjectURL.bind(URL);URL.createObjectURL=blob=>{const url=create(blob);window.__importBlobs.set(url,blob);return url;};HTMLAnchorElement.prototype.click=function(){if(this.download)window.__importFiles.push({name:this.download,url:this.href});};
   });}
   async function file(id='saveProject'){
