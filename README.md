@@ -103,6 +103,8 @@ After exporting, the next steps match the file: Bambu users are told to open it 
 
 **Design** shows the artwork with optional illustrative hands. **Print mesh** displays the actual validated STL geometry, including shaft opening, thickness, SVG relief, hour details, and an enabled rear mount. Flat-front mode shows the actual flat colored face instead of raised front details. Drag to orbit, scroll/pinch or use the buttons to zoom, and use Front/Angle/Back to inspect the model. The optional edges, build-plate, and SVG-color displays do not alter the exported model. SVG colors use the same embedded texture placement as 3MF. Three.js is bundled locally and loaded only when needed; rendering runs on changes rather than in a continuous animation loop. If 3D graphics are unavailable, design editing, model checks, and downloads remain usable.
 
+The A1 build plate is transparent in Print mesh: a light grid and exact outer boundary show the 256 × 256 mm print area while keeping the clock visible from underneath. Custom plates use the same transparent display. The Build plate checkbox controls the grid, and an oversized model still changes its color as a warning. Desk view retains a solid floor for inspecting a standing clock.
+
 **Expand preview** gives Design and Print mesh most of the window, including on a phone. It reuses the existing preview, model and camera; closing it restores editing focus and page position. Narrow 3D views adjust their framing to keep the complete clock visible, while preserving relative zoom. With the preview focused, use the arrow keys to rotate, +/− to zoom, 0 to reset, 1 for Front, 2 for Angle, 3 for Back in Print mesh, and 4 for Desk when a stand is enabled. F expands the preview; Esc or **Back to editing** returns to the workspace. Preview inspection does not change print files.
 
 **Check model** reports the measured X × Y × Z bounds, solid volume in cm³, and number of connected parts. Solid volume describes the model geometry, not an infill-dependent material estimate or print-time estimate. The build-plate settings accept 80–500 mm per side and check both direct and quarter-turn fit. **Make it fit** reduces the diameter with a 2 mm margin per side when possible. The 100 mm minimum still applies. Multiple disconnected SVG pieces are reported, with an optional one-click round backing; connecting geometry is added only when you enable it. Print checks supplement inspection in the printer's slicer.
@@ -113,8 +115,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.18.1-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.18.1-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.18.2-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.18.2-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 

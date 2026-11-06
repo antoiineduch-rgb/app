@@ -123,20 +123,28 @@ export class PrintView{
   setBed(width,depth,fits=true,visible=this.plateVisible){
     this.plateVisible=visible;
     const key=[width,depth,fits].join(',');
-    if(key===this.bedKey&&this.bed){for(const object of this.bed)object.visible=visible&&this.viewMode!==(this.faceDown?'front':'back');this.render();return;}
+    if(key===this.bedKey&&this.bed){this.updateBedVisibility();this.render();return;}
     this.bedKey=key;
     for(const object of this.bed||[]){this.scene.remove(object);object.geometry.dispose();object.material.dispose();}
     const points=[];
     for(let x=-width/2;x<=width/2+.01;x+=10)points.push(x,-depth/2,-.35,x,depth/2,-.35);
     for(let y=-depth/2;y<=depth/2+.01;y+=10)points.push(-width/2,y,-.35,width/2,y,-.35);
+    const corners=[[-width/2,-depth/2],[width/2,-depth/2],[width/2,depth/2],[-width/2,depth/2]];
+    for(let i=0;i<4;i++)points.push(...corners[i],-.35,...corners[(i+1)%4],-.35);
     const geometry=new BufferGeometry();geometry.setAttribute('position',new BufferAttribute(new Float32Array(points),3));
-    const grid=new LineSegments(geometry,new LineBasicMaterial({color:fits?'#d3d8cb':'#d9b6a6'}));
+    const grid=new LineSegments(geometry,new LineBasicMaterial({color:fits?'#aeb9a1':'#ca937c',transparent:true,opacity:.65,depthWrite:false}));
     const plane=new Mesh(new PlaneGeometry(width,depth),new MeshStandardMaterial({color:fits?'#e7eadf':'#eee1d8',roughness:1,metalness:0,side:DoubleSide}));plane.position.z=-.4;plane.receiveShadow=true;
-    this.bed=[plane,grid];for(const object of this.bed){object.visible=visible&&this.viewMode!==(this.faceDown?'front':'back');this.scene.add(object);}this.render();
+    this.bed=[plane,grid];for(const object of this.bed)this.scene.add(object);this.updateBedVisibility();this.render();
+  }
+  updateBedVisibility(){
+    if(!this.bed)return;
+    const visible=this.plateVisible&&this.viewMode!==(this.faceDown?'front':'back');
+    // The print bed is a transparent grid. Only Desk view needs a solid floor.
+    this.bed[0].visible=visible&&this.viewMode==='desk';this.bed[1].visible=visible;
   }
   setView(view){
     if(view==='desk'&&!this.deskPose)view='angle';
-    this.viewMode=view;for(const object of this.bed||[])object.visible=this.plateVisible&&view!==(this.faceDown?'front':'back');
+    this.viewMode=view;this.updateBedVisibility();
     const distance=(this.span||200)*1.65*(this.fitScale||1);
     this.controls.target.set(0,0,0);
     if(this.model){this.model.rotation.set(0,0,0);this.model.position.set(0,0,0);}
