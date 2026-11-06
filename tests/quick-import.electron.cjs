@@ -48,7 +48,11 @@ async function run(window){
     clipboard.writeText(text);await evaluate(id=>document.getElementById(id).focus(),target);window.webContents.paste();
   }
   const preset=id=>evaluate(id=>document.querySelector(`[data-design="${id}"]`).click(),id);
-  const svg=readFileSync(join(__dirname,'fixtures/bambu-colors.svg'),'utf8'),svgPath=join(profile,'Dropped colors.SVG');writeFileSync(svgPath,svg);
+  const sourceSVG=readFileSync(join(__dirname,'fixtures/bambu-colors.svg'),'utf8');
+  const svg=process.argv.includes('--fixture-crlf')?sourceSVG.replace(/\r?\n/g,'\r\n'):sourceSVG,svgPath=join(profile,'Dropped colors.SVG');writeFileSync(svgPath,svg);
+  // Textarea values normalize CRLF to LF, including native Windows clipboard pastes.
+  // Keep original file bytes intact; normalize only this text-input expectation.
+  const pastedSVG=svg.replace(/\r\n?/g,'\n');
   const invalid=join(profile,'Broken.svg'),unsupported=join(profile,'Photo.png'),large=join(profile,'Too large.svg'),folder=join(profile,'A folder.svg');
   writeFileSync(invalid,'<svg xmlns="http://www.w3.org/2000/svg"><path');writeFileSync(unsupported,'not SVG');writeFileSync(large,' '.repeat(5*1024*1024+1));mkdirSync(folder);
   window.webContents.debugger.attach('1.3');await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width:1380,height:1000,deviceScaleFactor:1,mobile:false});await hooks();await click('dismissWelcome');
@@ -81,7 +85,7 @@ async function run(window){
   await set('pasteSvgSource','');await nativePaste(svg,'pasteSvgSource');await wait(()=>document.getElementById('pasteSvgSource').value.includes('<svg'),'textarea clipboard paste');
   const undo=Menu.getApplicationMenu().items.find(item=>item.label==='Edit').submenu.items.find(item=>item.label==='Undo design change');undo.click(undo,window);await wait(()=>document.getElementById('pasteSvgSource').value==='','native text undo');
   await evaluate(()=>document.getElementById('usePastedSvg').focus());undo.click(undo,window);await new Promise(r=>setTimeout(r,75));assert.deepEqual(await file(),intact,'undo on a modal button cannot edit the clock behind it');
-  await nativePaste(svg,'pasteSvgSource');await wait(text=>document.getElementById('pasteSvgSource').value===text,'corrected source',svg);window.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter',modifiers:['control']});window.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter',modifiers:['control']});await wait(()=>!document.getElementById('pasteSvgDialog').open,'keyboard SVG import');await ready('Pasted artwork.svg');assert.deepEqual(await file('export'),baseline);
+  await nativePaste(svg,'pasteSvgSource');await wait(text=>document.getElementById('pasteSvgSource').value===text,'corrected source',pastedSVG);window.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter',modifiers:['control']});window.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter',modifiers:['control']});await wait(()=>!document.getElementById('pasteSvgDialog').open,'keyboard SVG import');await ready('Pasted artwork.svg');assert.deepEqual(await file('export'),baseline);
   console.log('PASS native clipboard imports, XML declarations/comments, normal text fields, editable SVG errors, UTF-8 size limits, native text undo, and Ctrl+Enter');
 
   const project=await file(),projectPath=join(profile,'Saved clock.clock');writeFileSync(projectPath,project);

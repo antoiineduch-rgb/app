@@ -80,7 +80,7 @@ jobs:
         run: npm run test:projects
 
       - name: Test file drops, native clipboard SVG, and safe import recovery
-        run: npm run test:quick-import
+        run: npm run test:quick-import -- --fixture-crlf
 
       - name: Build Windows installer
         run: npm run dist:win

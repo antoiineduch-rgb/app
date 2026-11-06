@@ -113,8 +113,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.18.0-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.18.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.18.1-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.18.1-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
@@ -174,7 +174,7 @@ Run `npm run test:workspace` for simultaneous invalid/valid measurement edits an
 
 Run `npm run test:projects` for real IndexedDB concurrency, exact deduplication and hash-collision safety, a full library without eviction, atomic quota-failure rollback, complete SVG clocks reopened after recent-artwork removal and reload, byte-identical colored 3MF, reversible removal, corrupt-project rejection, newer-edit precedence during delayed saves/opens, native backups of saved copies, storage fallback/recovery, and mobile layouts. It also tests keyboard setting discovery and hidden-control navigation without changing design parameters. Use the same software WebGL headless flags as `test:studio`.
 
-Run `npm run test:quick-import` for native file drag events on the preview and upload area, native clipboard imports and text editing, byte-identical Bambu color exports, full `.clock` restoration, rejected files and folders without data loss, modal protection, inline paste errors, UTF-8 size limits, newer edits during a delayed import, and mobile layout/focus. Run it separately from other GUI suites because it uses the OS clipboard and window focus. Use the same software WebGL headless flags as `test:studio`.
+Run `npm run test:quick-import` for native file drag events on the preview and upload area, native clipboard imports and text editing, byte-identical Bambu color exports, full `.clock` restoration, rejected files and folders without data loss, modal protection, inline paste errors, UTF-8 size limits, newer edits during a delayed import, and mobile layout/focus. Add `-- --fixture-crlf` to exercise Windows line endings on any OS; Windows CI uses this variant. Textarea expectations normalize line endings while original imported files retain their source bytes. Run this suite separately from other GUI suites because it uses the OS clipboard and window focus. Use the same software WebGL headless flags as `test:studio`.
 
 Run `npm run test:bambu` for real desktop A1 exports, all four source colors, native sub-facet paint, exact STL geometry, color limits, back-color choices, and worker fallback. It also compares actual color-preview pixels with exported palettes, checks merged filament assignments, undo/reset/project restoration, analysis reuse, superseded jobs, and usable color pickers at 320 and 390 pixels. On display-free Linux use the same headless flags as the other SVG suites.
 
