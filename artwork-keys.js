@@ -1,6 +1,5 @@
 import {usesSVGBacking} from './svg-details.js';
-import {autoHourFit,followHourPath} from './hour-layout.js';
-const pathFields=s=>followHourPath(s)?[s.hourPathInset,s.hourStyle==='ticks'?false:s.hourPathRotate]:false;
+import {autoHourFit,hourPathSettings as pathFields} from './hour-layout.js';
 
 // These keys use the captured snapshot, so an export cannot borrow artwork
 // from a newer SVG or from edits made while its geometry is being prepared.

@@ -3,7 +3,7 @@ import { normalizeOrientation } from './svg-placement.js';
 import {normalizeFilamentOverrides,validFilamentOverrides} from './filament-colors.js';
 
 export const MAX_PROJECT_BYTES=12*1024*1024;
-export const DEFAULT_SETTINGS=Object.freeze({design:'petal',projectName:'My Clock',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true,hourStyle:'ticks',hourColor:'light',numberSize:100,numberPosition:100,exportFormat:'stl',svgDetail:'artwork',svgRelief:.8,svgTone:'contrast',showHands:true,threeMFTarget:'bambu-a1',filamentCount:4,bambuBackColor:'background',bambuColors:Object.freeze({}),svgBacking:false,svgBackingThickness:1.2,svgBackingMargin:3,hourFit:true,hourFollowPath:false,hourPathInset:2,hourPathRotate:false,mechanismRecess:false,recessWidth:55,recessHeight:55,recessDepth:5.5,recessClearance:.5,mechanismMount:'box',mechanismWall:1.6,mechanismFlatFront:true,deskStand:false,standWidth:45,standDepth:45,standLean:12,standClearance:4});
+export const DEFAULT_SETTINGS=Object.freeze({design:'petal',projectName:'My Clock',color:0,texture:'ripple',diameter:200,thickness:3,hole:8,markers:true,hourStyle:'ticks',hourColor:'light',numberSize:100,numberPosition:100,exportFormat:'stl',svgDetail:'artwork',svgRelief:.8,svgTone:'contrast',showHands:true,threeMFTarget:'bambu-a1',filamentCount:4,bambuBackColor:'background',bambuColors:Object.freeze({}),svgBacking:false,svgBackingThickness:1.2,svgBackingMargin:3,hourFit:true,hourFollowPath:false,hourPathInset:2,hourPathRotate:false,hourPreserveNumbers:true,mechanismRecess:false,recessWidth:55,recessHeight:55,recessDepth:5.5,recessClearance:.5,mechanismMount:'box',mechanismWall:1.6,mechanismFlatFront:true,deskStand:false,standWidth:45,standDepth:45,standLean:12,standClearance:4});
 const choices={design:[...designs.map(d=>d.id),'custom'],texture:['smooth','ripple','grain'],hourStyle:['ticks','arabic','roman'],hourColor:['light','dark','auto'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light'],threeMFTarget:['bambu-a1','standard'],filamentCount:[2,4],bambuBackColor:['background','face'],mechanismMount:['box','recess']};
 const ranges={color:[0,6,1],diameter:[100,300,1],thickness:[2,10,.5],hole:[5,15,.1],numberSize:[70,130,5],numberPosition:[80,120,5],hourPathInset:[0,15,.5],svgRelief:[0,2,.2],svgBackingThickness:[1,10,.2],svgBackingMargin:[1,12,.5],recessWidth:[5,90,.5],recessHeight:[5,90,.5],recessDepth:[.5,8,.1],recessClearance:[0,2,.1],mechanismWall:[1.2,4,.2],standWidth:[25,70,1],standDepth:[25,70,1],standLean:[6,20,1],standClearance:[2,20,1]};
 const bytes=value=>new TextEncoder().encode(value).byteLength;
@@ -18,7 +18,9 @@ export function normalizeSettings(input={}){
     const value=Number(input[key]);
     if(input[key]!=null&&Number.isFinite(value))settings[key]=Number(Math.min(max,Math.max(min,Math.round(value/step)*step)).toFixed(5));
   }
-  for(const key of ['markers','showHands','svgBacking','hourFit','hourFollowPath','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'])if(typeof input[key]==='boolean')settings[key]=input[key];
+  for(const key of ['markers','showHands','svgBacking','hourFit','hourFollowPath','hourPathRotate','hourPreserveNumbers','mechanismRecess','mechanismFlatFront','deskStand'])if(typeof input[key]==='boolean')settings[key]=input[key];
+  // Existing outline projects keep their previous rotation and automatic sizing.
+  if(input.hourPreserveNumbers===undefined&&input.hourFollowPath===true)settings.hourPreserveNumbers=false;
   if(input.mechanismRecess===true&&input.mechanismMount===undefined)settings.mechanismMount='recess';
   return settings;
 }
@@ -38,7 +40,7 @@ export function parseProject(text){
     const value=data.settings[key];
     if(value!==undefined&&(typeof value!=='number'||!Number.isFinite(value)||value<min||value>max||Math.abs(value/step-Math.round(value/step))>1e-6))throw Error(`The project has an invalid ${key} setting.`);
   }
-  for(const key of ['markers','showHands','svgBacking','hourFit','hourFollowPath','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'])if(data.settings[key]!==undefined&&typeof data.settings[key]!=='boolean')throw Error(`The project has an invalid ${key} setting.`);
+  for(const key of ['markers','showHands','svgBacking','hourFit','hourFollowPath','hourPathRotate','hourPreserveNumbers','mechanismRecess','mechanismFlatFront','deskStand'])if(data.settings[key]!==undefined&&typeof data.settings[key]!=='boolean')throw Error(`The project has an invalid ${key} setting.`);
   if(data.settings.bambuColors!==undefined&&!validFilamentOverrides(data.settings.bambuColors))throw Error('The project has invalid filament colors.');
   const settings=normalizeSettings(data.settings),artwork=checkedArtwork(data.artwork),orientation=normalizeOrientation(data.orientation);
   if(settings.design==='custom'&&!artwork)throw Error('The project is missing its imported SVG.');

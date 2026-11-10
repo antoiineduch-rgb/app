@@ -28,6 +28,7 @@ export const SETTINGS=[
   ['hourFit','Fit hours to SVG','Hours','automatic labels fit adapter chiffres'],
   ['hourFollowPath','Follow SVG outline','Hours','path edge contour shape suivre chemin chiffres'],
   ['hourPathInset','Hours distance from edge','Hours','outline inset margin border contour distance bord'],
+  ['hourPreserveNumbers','Keep numbers unchanged','Hours','upright fixed size preserve shape no distortion chiffres droits taille conserver sans deformer'],
   ['hourPathRotate','Rotate numbers with outline','Hours','orientation tangent path contour rotation tourner chiffres'],
   ['swatches','Face color','Colors','filament back couleur fond'],
   ['texture','Surface texture','Finish','smooth ripple crosshatch texture lisse'],

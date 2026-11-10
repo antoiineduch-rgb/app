@@ -8,7 +8,7 @@ import {fitHourLayout,fittedHourPolygons} from './hour-layout.js';
 import {makeClockSTL} from './mesh.js';
 import {analyzeSTL} from './mesh-analysis.js';
 
-const settings={...DEFAULT_SETTINGS,design:'custom',diameter:200,texture:'smooth',hourStyle:'arabic',numberSize:70,hourFollowPath:true};
+const settings={...DEFAULT_SETTINGS,design:'custom',diameter:200,texture:'smooth',hourStyle:'arabic',numberSize:70,hourFollowPath:true,hourPreserveNumbers:false};
 const area=polygons=>polygons.reduce((sum,p)=>sum+p.reduce((s,r,i)=>{let a=0;for(let j=0;j<r.length-1;j++)a+=r[j][0]*r[j+1][1]-r[j+1][0]*r[j][1];return s+(i?-1:1)*Math.abs(a/2);},0),0);
 function raster(shape){const n=160,alpha=new Uint8Array(n*n);for(let y=0;y<n;y++)for(let x=0;x<n;x++)if(shape(x,y))alpha[y*n+x]=255;return {n,alpha};}
 const rectangle=()=>raster((x,y)=>x>=10&&x<150&&y>=35&&y<125);
@@ -17,6 +17,49 @@ const layout=(raw,s=settings)=>fitHourLayout(raw.alpha,raw.n,artworkFrame(raw.al
 function directions(result){for(const label of result.labels){const a=label.hour*Math.PI/6;assert.ok(Math.abs(label.x*Math.cos(a)-label.y*Math.sin(a))<1e-5,'each label stays in its true hour-hand direction');}}
 function noCollisions(result){for(let i=0;i<result.labels.length;i++)for(let j=i+1;j<result.labels.length;j++)assert.ok(area(clipping.intersection(result.labels[i].polygons,result.labels[j].polygons))<1e-5);}
 function closed(buffer){const v=new DataView(buffer),edges=new Map();for(let i=0;i<v.getUint32(80,true);i++){const p=[0,1,2].map(j=>[0,1,2].map(k=>v.getFloat32(96+i*50+j*12+k*4,true)||0));for(let j=0;j<3;j++){const a=p[j].join(','),b=p[(j+1)%3].join(','),key=a<b?a+'|'+b:b+'|'+a,e=edges.get(key)||[0,0];e[0]++;e[1]+=a<b?1:-1;edges.set(key,e);}}for(const [count,winding]of edges.values()){assert.equal(count,2);assert.equal(winding,0);}}
+
+function unchangedNumbers(result,s){
+  assert.equal(result.scale,1);
+  const originals=hourNumeralLabels(s);
+  for(const label of result.labels){
+    const original=originals.find(l=>l.hour===label.hour);
+    assert.equal(label.scale,1);assert.equal(label.rotation,0);
+    assert.equal(label.polygons.length,original.polygons.length);
+    label.polygons.forEach((polygon,p)=>{
+      assert.equal(polygon.length,original.polygons[p].length,'all glyph holes and separated strokes survive');
+      polygon.forEach((ring,r)=>{
+        assert.equal(ring.length,original.polygons[p][r].length);
+        ring.forEach(([x,y],i)=>{
+          const [ox,oy]=original.polygons[p][r][i];
+          assert.ok(Math.abs((x-label.x)-(ox-original.x))<1.6e-6,'every horizontal glyph coordinate is unchanged');
+          assert.ok(Math.abs((y-label.y)-(oy-original.y))<1.6e-6,'every vertical glyph coordinate is unchanged');
+        });
+      });
+    });
+  }
+  directions(result);noCollisions(result);
+}
+
+test('preserved Arabic and Roman hours only move, even after turning or mirroring the SVG or requesting tangent rotation',()=>{
+  for(const hourStyle of ['arabic','roman'])for(const numberSize of [70,130])for(const shape of [rectangle,circle,()=>raster((x,y)=>x>=35&&x<125&&y>=10&&y<150),()=>raster((x,y)=>x>=10&&x<150&&y>=25&&y<115)]){
+    const raw=shape(),s={...settings,hourStyle,numberSize,hourPreserveNumbers:true,hourPathRotate:true};
+    for(const hourPathInset of [0,7]){
+      const next={...s,hourPathInset},result=layout(raw,next);assert.equal(result.labels.length,12);unchangedNumbers(result,next);
+    }
+  }
+});
+
+test('preserved hours report insufficient space instead of shrinking; a backing supports all complete requested-size glyphs',()=>{
+  const raw=raster((x,y)=>x>=10&&x<150&&y>=60&&y<100);
+  for(const hourStyle of ['arabic','roman']){
+    const s={...settings,hourStyle,numberSize:100,hourPreserveNumbers:true},result=layout(raw,s);
+    assert.ok(result.missing.length>0);unchangedNumbers(result,s);
+    assert.throws(()=>makeClockSTL(raw.alpha,raw.n,s),/Some hours cannot fit/);
+    const automatic=layout(raw,{...s,hourPreserveNumbers:false});assert.equal(automatic.labels.length,12);assert.ok(automatic.scale<1);
+    const backed={...s,svgBacking:true},supported=layout(raw,backed);assert.equal(supported.labels.length,12);unchangedNumbers(supported,backed);
+    const stl=makeClockSTL(raw.alpha,raw.n,backed);closed(stl);assert.equal(analyzeSTL(stl).components,1);
+  }
+});
 
 test('following a wide outline moves side hours toward its edge while retaining all correct hand angles',()=>{
   const raw=rectangle(),result=layout(raw),fitted=layout(raw,{...settings,hourFollowPath:false});

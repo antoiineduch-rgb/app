@@ -14,7 +14,7 @@ import { analyzeSTL,bedFit } from './mesh-analysis.js';
 import {FilamentPreview} from './filament-preview.js';
 import {normalizeFilamentOverrides} from './filament-colors.js';
 import {HoleFitDialog} from './hole-fit-ui.js';
-import {autoHourFit,followHourPath,fitHourLayout,hourLayoutMarkup} from './hour-layout.js';
+import {autoHourFit,followHourPath,preserveHourNumbers,hourPathSettings as hourPathState,fitHourLayout,hourLayoutMarkup} from './hour-layout.js';
 import {RECESS_SKIN,recessDimensions} from './mechanism-recess.js';
 import {raisedMechanismBox,flatFrontOnBed,boxDimensions} from './mechanism-box.js';
 import {artworkPlacement} from './artwork-surface.js';
@@ -56,7 +56,6 @@ let previewMode='design',meshView=null,loadedMeshKey=null,meshPreviewKey=null,me
 let bed={width:220,depth:220},bedPreset='custom';
 try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500)){bed={width:saved.width,depth:saved.depth};if(saved.preset==='a1'&&saved.width===256&&saved.depth===256)bedPreset='a1';}}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
-function hourPathState(settings=state){return followHourPath(settings)?[settings.hourPathInset,settings.hourStyle==='ticks'?false:settings.hourPathRotate]:false;}
 function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,flatFrontOnBed(settings)?'flat':[settings.svgDetail,settings.svgRelief,settings.svgTone],settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit,hourPathState(settings)]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)||flatFrontOnBed(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.mechanismMount,settings.mechanismFlatFront,settings.mechanismWall,settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false,settings.deskStand?[settings.standWidth,settings.standDepth,settings.standLean,settings.standClearance,settings.recessHeight,settings.recessClearance]:false]);}
 function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[paintKey({settings:{...settings,faceColor:colors[settings.color][1]},revision:customRevision,placement:artworkOrientation}),settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor,Object.entries(settings.bambuColors).sort()]:null]:null]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
@@ -140,14 +139,17 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   $('hourFit').checked=state.hourFit;$('hourFitControls').hidden=state.design!=='custom'||!state.markers;
   const following=followHourPath(state);$('hourFollowPath').checked=state.hourFollowPath;$('hourFollowPath').disabled=!state.hourFit;
   $('hourPathOptions').hidden=!following;$('hourPathInset').value=state.hourPathInset;$('hourPathInsetValue').textContent=state.hourPathInset;
-  $('hourPathRotate').checked=state.hourPathRotate;$('hourPathRotate').disabled=state.hourStyle==='ticks';$('numberPositionControl').hidden=following;
+  const preserveNumbers=preserveHourNumbers(state);
+  $('hourPreserveNumbers').checked=state.hourPreserveNumbers;$('hourPreserveNumbers').disabled=state.hourStyle==='ticks';
+  $('hourPathRotate').checked=!preserveNumbers&&state.hourPathRotate;$('hourPathRotate').disabled=state.hourStyle==='ticks'||preserveNumbers;$('numberPositionControl').hidden=following;
   const fitted=autoHourFit(state)?sourceInfo(designSnapshot()).layout:null;
   $('hourFitStatus').textContent=fitted?`${fitted.labels.length}/12 hours fit${fitted.scale<.999?' · '+Math.round(fitted.scale*100)+'% of requested size':''}.${fitted.missing.length?' A round backing can support the remaining hours.':''}`:'Manual circle placement. Numbers may be clipped at the SVG edge.';
   if(following){const supported=fitted.labels.filter(label=>label.onBacking).length;$('hourFitStatus').textContent+=` Following the SVG outline.${supported?` ${supported} hours use the backing for support.`:''}${fitted.missing.length?' Reduce the edge distance or add a round backing.':''}`;}
+  if(preserveNumbers)$('hourFitStatus').textContent+=' Numbers stay upright at the chosen size.';
   $('hourFitStatus').dataset.tone=fitted?.missing.length?'warning':'success';$('backingForHours').hidden=!fitted?.missing.length;
   $('numeralOptions').hidden=!state.markers||state.hourStyle==='ticks';
   $('numberPrintHelp').textContent=flat?'Numbers stay upright and use flat color in 3MF. Turn off “Flat front on bed” to restore raised numbers.':'Numbers stay upright and print in relief. SVG fitting adjusts their size and distance when needed; turn it off for manual placement.';
-  if(following)$('numberPrintHelp').textContent=`Numbers ${state.hourPathRotate?'turn with the SVG outline':'stay upright along the SVG outline'}. ${flat?'Use color 3MF to print the flat numbers.':'The print mesh uses the same positions and rotation.'}`;
+  if(following)$('numberPrintHelp').textContent=`${preserveNumbers?'Only the positions change: no turning, stretching or automatic shrinking.':`Numbers ${state.hourPathRotate?'turn with the SVG outline':'stay upright along the SVG outline'}.`} ${flat?'Use color 3MF to print the flat numbers.':'The print mesh uses the same complete number shapes.'}`;
   for(const id of ['numberSize','numberPosition']){$(id).value=state[id];$(id+'Value').textContent=state[id];}
   $('svgDetailControls').hidden=state.design!=='custom';$('svgDetail').value=state.svgDetail;
   $('svgReliefControls').hidden=!detailed||flat;$('svgRelief').value=state.svgRelief;$('svgReliefValue').textContent=state.svgRelief.toFixed(1);$('svgTone').value=state.svgTone;
@@ -268,16 +270,16 @@ function makeRecessRoom(){
 function enableSupportingBacking(){state.svgBacking=true;makeRecessRoom();render({forceInputs:true});}
 $('backingForHours').onclick=enableSupportingBacking;$('backingForRecess').onclick=enableSupportingBacking;$('backingForStand').onclick=enableSupportingBacking;
 $('inspectStand').onclick=()=>{if(!state.deskStand||importPending||restorePending||deletingArtwork)return;setPreviewMode('print');meshCamera('desk');$('preview').scrollIntoView({behavior:'smooth',block:'start'});};
-['diameter','thickness','hole','markers','svgBacking','hourFit','hourFollowPath','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'].forEach(id=>$(id).addEventListener('input',()=>{
+['diameter','thickness','hole','markers','svgBacking','hourFit','hourFollowPath','hourPreserveNumbers','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'].forEach(id=>$(id).addEventListener('input',()=>{
   const input=$(id);
-  if(['markers','svgBacking','hourFit','hourFollowPath','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)){state[id]=input.checked;if((id==='mechanismRecess'||id==='svgBacking')&&input.checked)makeRecessRoom();}
+  if(['markers','svgBacking','hourFit','hourFollowPath','hourPreserveNumbers','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)){state[id]=input.checked;if((id==='mechanismRecess'||id==='svgBacking')&&input.checked)makeRecessRoom();}
   else{
     if(id!=='diameter')input.dataset.editing='true';
     if(!input.validity.valid||input.value===''){validateDimensions();return;}
     state[id]=Number(input.value);
     if(id==='diameter'){delete $('diameterNumber').dataset.editing;$('diameterNumber').value=state.diameter;}
   }
-  validateDimensions();render({historyGroup:['markers','svgBacking','hourFit','hourFollowPath','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)?null:id});
+  validateDimensions();render({historyGroup:['markers','svgBacking','hourFit','hourFollowPath','hourPreserveNumbers','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)?null:id});
   if(id==='deskStand'&&state.deskStand){setPreviewMode('print');meshCamera('desk');}
 }));
 for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean','standClearance'])$(id).addEventListener('input',()=>{
@@ -869,14 +871,14 @@ function jumpToSetting(entry){
   if(importPending||restorePending||deletingArtwork){toast('Wait for your artwork to finish opening, then choose a setting.');return;}
   if(entry.id==='myProjects'){projectLibrary.open();return;}
   let target=$(entry.id),message='';
-  const svgOnly=['svgDetail','svgRelief','artRotateLeft','svgBacking','hourFit','hourFollowPath','hourPathInset','hourPathRotate'];
+  const svgOnly=['svgDetail','svgRelief','artRotateLeft','svgBacking','hourFit','hourFollowPath','hourPathInset','hourPathRotate','hourPreserveNumbers'];
   if(['svgUpload','pasteSvg'].includes(entry.id)||svgOnly.includes(entry.id)){
     tab(true);
     if(!['svgUpload','pasteSvg'].includes(entry.id)&&state.design!=='custom'){target=activeArtwork?$('useArtwork'):$('svgUpload');message='Choose or import SVG artwork to use this setting.';}
     else if(entry.id==='svgRelief'&&flatFrontOnBed(state)){document.querySelector('.advanced-settings').open=true;target=$(state.deskStand?'deskStand':'mechanismFlatFront');message='Flat-front printing pauses raised artwork. The rear-accessory controls explain this option.';}
     else if(entry.id==='svgRelief'&&state.svgDetail!=='artwork'){target=$('svgDetail');message='Choose Original artwork + details to adjust SVG relief.';}
-    else if(['hourFollowPath','hourPathInset','hourPathRotate'].includes(entry.id)&&!state.hourFit){target=$('hourFit');message='Turn on Fit hours to SVG to follow its outline.';}
-    else if(['hourPathInset','hourPathRotate'].includes(entry.id)&&!state.hourFollowPath){target=$('hourFollowPath');message='Turn on Follow SVG outline to adjust its edge distance and rotation.';}
+    else if(['hourFollowPath','hourPathInset','hourPathRotate','hourPreserveNumbers'].includes(entry.id)&&!state.hourFit){target=$('hourFit');message='Turn on Fit hours to SVG to follow its outline.';}
+    else if(['hourPathInset','hourPathRotate','hourPreserveNumbers'].includes(entry.id)&&!state.hourFollowPath){target=$('hourFollowPath');message='Turn on Follow SVG outline to adjust its edge distance and numbers.';}
   }
   if(['Size & fit','Mechanism','Stand'].includes(entry.section)&&entry.id!=='diameterNumber'){
     document.querySelector('.advanced-settings').open=true;
@@ -889,7 +891,8 @@ function jumpToSetting(entry){
   }
   if(entry.section==='Hours'){
     if(!state.markers){target=$('markers');message='Turn on hour details to adjust the numbers.';}
-    else if(['numberSize','numberPosition','hourPathRotate'].includes(entry.id)&&state.hourStyle==='ticks'){target=$('hourStyle');message='Choose Arabic or Roman numbers to adjust their size, position or rotation.';}
+    else if(['numberSize','numberPosition','hourPathRotate','hourPreserveNumbers'].includes(entry.id)&&state.hourStyle==='ticks'){target=$('hourStyle');message='Choose Arabic or Roman numbers to adjust their size, position or rotation.';}
+    else if(entry.id==='hourPathRotate'&&preserveHourNumbers(state)){target=$('hourPreserveNumbers');message='Turn off Keep numbers unchanged to rotate the numbers with the outline.';}
     else if(entry.id==='numberPosition'&&followHourPath(state)){target=$('hourPathInset');message='Outline placement uses Distance from edge.';}
   }
   if(entry.id==='texture'&&$('texture').hidden){target=flatFrontOnBed(state)?$(state.deskStand?'deskStand':'mechanismFlatFront'):$('svgDetail');if(flatFrontOnBed(state))document.querySelector('.advanced-settings').open=true;else tab(true);message='Surface texture is available with silhouette artwork and raised-front printing.';}

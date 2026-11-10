@@ -16,6 +16,16 @@ test('settings migration keeps legacy designs and uses bounded defaults for newe
   const value=normalizeSettings({design:'custom',diameter:187,color:100,svgRelief:Infinity,showHands:false,unknown:'unsafe',projectName:' <Leaf>\u0001 '});
   assert.equal(value.diameter,187);assert.equal(value.color,6);assert.equal(value.svgRelief,.8);assert.equal(value.showHands,false);assert.equal(value.projectName,'Leaf');assert.equal(value.unknown,undefined);
 });
+test('unchanged hour numbers are the new outline default while earlier outline projects keep automatic sizing and rotation',()=>{
+  assert.equal(DEFAULT_SETTINGS.hourPreserveNumbers,true);
+  const settings={...DEFAULT_SETTINGS,hourFollowPath:true,hourPreserveNumbers:true,hourPathRotate:true};
+  assert.deepEqual(parseProject(serializeProject(settings)).settings,settings);
+  const legacy=JSON.parse(serializeProject(settings));delete legacy.settings.hourPreserveNumbers;
+  const restored=parseProject(JSON.stringify(legacy)).settings;
+  assert.equal(restored.hourPreserveNumbers,false);assert.equal(restored.hourPathRotate,true);
+  assert.equal(normalizeSettings({...legacy.settings,hourFollowPath:false}).hourPreserveNumbers,true);
+  legacy.settings.hourPreserveNumbers='true';assert.throws(()=>parseProject(JSON.stringify(legacy)),/invalid hourPreserveNumbers/);
+});
 test('invalid projects cannot silently overwrite current settings or lose their SVG',()=>{
   const json=JSON.parse(serializeProject(DEFAULT_SETTINGS));
   for(const patch of [{version:2},{format:'other'},{settings:[]},{settings:{design:'custom'}},{settings:{diameter:30}},{settings:{thickness:2.3}},{settings:{hole:'8'}},{settings:{showHands:'false'}},{orientation:[2,0,0,1]},{artwork:{name:'broken.svg'}}])assert.throws(()=>parseProject(JSON.stringify({...json,...patch})),/project/i);
