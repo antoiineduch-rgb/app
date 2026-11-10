@@ -1,0 +1,51 @@
+name: Audit published Windows download
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/audit-windows-download.yml'
+      - 'desktop/audit-windows-download.ps1'
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Completed official Windows build run ID'
+        default: '42833906286'
+        required: true
+      artifact_id:
+        description: 'Immutable Windows artifact ID from that build'
+        default: '13774155385'
+        required: true
+      zip_sha256:
+        description: 'Published SHA-256 digest of the original ZIP'
+        default: 'fe8249178297527ac4b7936e63eb8e74f169ebd7da8f16ca64d9594c82c38eb4'
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the published files, signatures and Microsoft Defender result
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.run_id || '42833906286' }}
+          SOURCE_ARTIFACT: ${{ inputs.artifact_id || '13774155385' }}
+          SOURCE_DIGEST: ${{ inputs.zip_sha256 || 'fe8249178297527ac4b7936e63eb8e74f169ebd7da8f16ca64d9594c82c38eb4' }}
+        run: ./desktop/audit-windows-download.ps1 -RunId $env:SOURCE_RUN -ArtifactId $env:SOURCE_ARTIFACT -ExpectedZipSha256 $env:SOURCE_DIGEST
+
+      - name: Retain the audit report, including unsuccessful scans
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clock-Factory-download-audit
+          path: download-audit/
+          if-no-files-found: warn
+          retention-days: 30
