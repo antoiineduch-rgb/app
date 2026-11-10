@@ -18,11 +18,13 @@ test('settings migration keeps legacy designs and uses bounded defaults for newe
 });
 test('unchanged hour numbers are the new outline default while earlier outline projects keep automatic sizing and rotation',()=>{
   assert.equal(DEFAULT_SETTINGS.hourPreserveNumbers,true);
+  assert.equal(DEFAULT_SETTINGS.hourPathRotate,true);
   const settings={...DEFAULT_SETTINGS,hourFollowPath:true,hourPreserveNumbers:true,hourPathRotate:true};
   assert.deepEqual(parseProject(serializeProject(settings)).settings,settings);
   const legacy=JSON.parse(serializeProject(settings));delete legacy.settings.hourPreserveNumbers;
   const restored=parseProject(JSON.stringify(legacy)).settings;
   assert.equal(restored.hourPreserveNumbers,false);assert.equal(restored.hourPathRotate,true);
+  delete legacy.settings.hourPathRotate;assert.equal(parseProject(JSON.stringify(legacy)).settings.hourPathRotate,false);
   assert.equal(normalizeSettings({...legacy.settings,hourFollowPath:false}).hourPreserveNumbers,true);
   legacy.settings.hourPreserveNumbers='true';assert.throws(()=>parseProject(JSON.stringify(legacy)),/invalid hourPreserveNumbers/);
 });

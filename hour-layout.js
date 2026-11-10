@@ -5,7 +5,7 @@ const snap=value=>Math.round(value*1e6)/1e6;
 export const autoHourFit=settings=>settings.design==='custom'&&settings.hourFit===true&&settings.markers;
 export const followHourPath=settings=>autoHourFit(settings)&&settings.hourFollowPath===true;
 export const preserveHourNumbers=settings=>followHourPath(settings)&&settings.hourStyle!=='ticks'&&settings.hourPreserveNumbers===true;
-export const hourPathSettings=settings=>followHourPath(settings)?[settings.hourPathInset,settings.hourStyle!=='ticks'&&!preserveHourNumbers(settings)&&settings.hourPathRotate===true,preserveHourNumbers(settings)]:false;
+export const hourPathSettings=settings=>followHourPath(settings)?[settings.hourPathInset,settings.hourStyle!=='ticks'&&settings.hourPathRotate===true,preserveHourNumbers(settings)]:false;
 const placedPoint=(x,y,original,placed)=>{
   const dx=(x-original.x)*placed.scale,dy=(y-original.y)*placed.scale,angle=placed.rotation||0;
   if(!angle)return [snap(placed.x+dx),snap(placed.y+dy)];
@@ -45,7 +45,7 @@ function outlineRays(alpha,n,frame,settings,step){
   };
   return Array.from({length:12},(_,i)=>{
     const angle=(i+1)*Math.PI/6,radius=edge(angle);let rotation=0;
-    if(settings.hourPathRotate&&!preserveHourNumbers(settings)&&settings.hourStyle!=='ticks'&&radius){
+    if(settings.hourPathRotate&&settings.hourStyle!=='ticks'&&radius){
       const delta=Math.PI/90,a=edge(angle-delta),b=edge(angle+delta);
       if(a&&b){const x=Math.sin(angle+delta)*b-Math.sin(angle-delta)*a,y=Math.cos(angle+delta)*b-Math.cos(angle-delta)*a;
         rotation=Math.atan2(y,x);while(rotation>Math.PI/2)rotation-=Math.PI;while(rotation< -Math.PI/2)rotation+=Math.PI;
@@ -60,8 +60,8 @@ export function fitHourLayout(alpha,n,frame,settings){
   const following=followHourPath(settings),inside=footprint(alpha,n,frame,settings),clearance=.6;
   const step=following?Math.max(.15,Math.min(.25,frame.scale)):Math.max(.4,settings.diameter/350),maxRadius=settings.diameter*.8,inset=following?Math.max(clearance,settings.hourPathInset??2):clearance;
   const outlineInside=following?(usesSVGBacking(settings)?footprint(alpha,n,frame,settings,true):inside):null,rays=following?outlineRays(alpha,n,frame,settings,step):null;
-  // Preserve mode only translates complete labels. If the requested size cannot
-  // fit, report missing hours rather than rotating, shrinking or clipping them.
+  // Each complete label can move and rotate as one rigid shape. Preserve its
+  // requested size, reporting missing hours rather than shrinking or clipping.
   const minimum=preserveHourNumbers(settings)?1:settings.hourStyle==='ticks'?Math.min(1,.6/(settings.diameter*5/400)):Math.min(1,4.2/(originals[0]?.height||4.2));
   const limits=originals.map(label=>{
     const rotation=rays?.[label.hour-1].rotation||0,polygons=rotation?label.polygons.map(p=>p.map(r=>r.map(([x,y])=>placedPoint(x,y,label,{x:label.x,y:label.y,scale:1,rotation})))):label.polygons,b=bounds(polygons);

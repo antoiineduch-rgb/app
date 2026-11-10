@@ -141,15 +141,15 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   $('hourPathOptions').hidden=!following;$('hourPathInset').value=state.hourPathInset;$('hourPathInsetValue').textContent=state.hourPathInset;
   const preserveNumbers=preserveHourNumbers(state);
   $('hourPreserveNumbers').checked=state.hourPreserveNumbers;$('hourPreserveNumbers').disabled=state.hourStyle==='ticks';
-  $('hourPathRotate').checked=!preserveNumbers&&state.hourPathRotate;$('hourPathRotate').disabled=state.hourStyle==='ticks'||preserveNumbers;$('numberPositionControl').hidden=following;
+  $('hourPathRotate').checked=state.hourPathRotate;$('hourPathRotate').disabled=state.hourStyle==='ticks';$('numberPositionControl').hidden=following;
   const fitted=autoHourFit(state)?sourceInfo(designSnapshot()).layout:null;
   $('hourFitStatus').textContent=fitted?`${fitted.labels.length}/12 hours fit${fitted.scale<.999?' · '+Math.round(fitted.scale*100)+'% of requested size':''}.${fitted.missing.length?' A round backing can support the remaining hours.':''}`:'Manual circle placement. Numbers may be clipped at the SVG edge.';
   if(following){const supported=fitted.labels.filter(label=>label.onBacking).length;$('hourFitStatus').textContent+=` Following the SVG outline.${supported?` ${supported} hours use the backing for support.`:''}${fitted.missing.length?' Reduce the edge distance or add a round backing.':''}`;}
-  if(preserveNumbers)$('hourFitStatus').textContent+=' Numbers stay upright at the chosen size.';
+  if(preserveNumbers)$('hourFitStatus').textContent+=' Numbers keep the chosen size and proportions.';
   $('hourFitStatus').dataset.tone=fitted?.missing.length?'warning':'success';$('backingForHours').hidden=!fitted?.missing.length;
   $('numeralOptions').hidden=!state.markers||state.hourStyle==='ticks';
   $('numberPrintHelp').textContent=flat?'Numbers stay upright and use flat color in 3MF. Turn off “Flat front on bed” to restore raised numbers.':'Numbers stay upright and print in relief. SVG fitting adjusts their size and distance when needed; turn it off for manual placement.';
-  if(following)$('numberPrintHelp').textContent=`${preserveNumbers?'Only the positions change: no turning, stretching or automatic shrinking.':`Numbers ${state.hourPathRotate?'turn with the SVG outline':'stay upright along the SVG outline'}.`} ${flat?'Use color 3MF to print the flat numbers.':'The print mesh uses the same complete number shapes.'}`;
+  if(following)$('numberPrintHelp').textContent=`Numbers ${state.hourPathRotate?'turn as complete shapes with the SVG outline':'stay upright along the SVG outline'}, without stretching or bending.${preserveNumbers?' Their chosen size stays unchanged.':''} ${flat?'Use color 3MF to print the flat numbers.':'The print mesh uses the same complete number shapes.'}`;
   for(const id of ['numberSize','numberPosition']){$(id).value=state[id];$(id+'Value').textContent=state[id];}
   $('svgDetailControls').hidden=state.design!=='custom';$('svgDetail').value=state.svgDetail;
   $('svgReliefControls').hidden=!detailed||flat;$('svgRelief').value=state.svgRelief;$('svgReliefValue').textContent=state.svgRelief.toFixed(1);$('svgTone').value=state.svgTone;
@@ -892,7 +892,6 @@ function jumpToSetting(entry){
   if(entry.section==='Hours'){
     if(!state.markers){target=$('markers');message='Turn on hour details to adjust the numbers.';}
     else if(['numberSize','numberPosition','hourPathRotate','hourPreserveNumbers'].includes(entry.id)&&state.hourStyle==='ticks'){target=$('hourStyle');message='Choose Arabic or Roman numbers to adjust their size, position or rotation.';}
-    else if(entry.id==='hourPathRotate'&&preserveHourNumbers(state)){target=$('hourPreserveNumbers');message='Turn off Keep numbers unchanged to rotate the numbers with the outline.';}
     else if(entry.id==='numberPosition'&&followHourPath(state)){target=$('hourPathInset');message='Outline placement uses Distance from edge.';}
   }
   if(entry.id==='texture'&&$('texture').hidden){target=flatFrontOnBed(state)?$(state.deskStand?'deskStand':'mechanismFlatFront'):$('svgDetail');if(flatFrontOnBed(state))document.querySelector('.advanced-settings').open=true;else tab(true);message='Surface texture is available with silhouette artwork and raised-front printing.';}

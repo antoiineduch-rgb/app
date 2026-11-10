@@ -8,7 +8,7 @@ import {fitHourLayout,fittedHourPolygons} from './hour-layout.js';
 import {makeClockSTL} from './mesh.js';
 import {analyzeSTL} from './mesh-analysis.js';
 
-const settings={...DEFAULT_SETTINGS,design:'custom',diameter:200,texture:'smooth',hourStyle:'arabic',numberSize:70,hourFollowPath:true,hourPreserveNumbers:false};
+const settings={...DEFAULT_SETTINGS,design:'custom',diameter:200,texture:'smooth',hourStyle:'arabic',numberSize:70,hourFollowPath:true,hourPathRotate:false,hourPreserveNumbers:false};
 const area=polygons=>polygons.reduce((sum,p)=>sum+p.reduce((s,r,i)=>{let a=0;for(let j=0;j<r.length-1;j++)a+=r[j][0]*r[j+1][1]-r[j+1][0]*r[j][1];return s+(i?-1:1)*Math.abs(a/2);},0),0);
 function raster(shape){const n=160,alpha=new Uint8Array(n*n);for(let y=0;y<n;y++)for(let x=0;x<n;x++)if(shape(x,y))alpha[y*n+x]=255;return {n,alpha};}
 const rectangle=()=>raster((x,y)=>x>=10&&x<150&&y>=35&&y<125);
@@ -23,28 +23,32 @@ function unchangedNumbers(result,s){
   const originals=hourNumeralLabels(s);
   for(const label of result.labels){
     const original=originals.find(l=>l.hour===label.hour);
-    assert.equal(label.scale,1);assert.equal(label.rotation,0);
+    assert.equal(label.scale,1);if(!s.hourPathRotate)assert.equal(label.rotation,0);
     assert.equal(label.polygons.length,original.polygons.length);
     label.polygons.forEach((polygon,p)=>{
       assert.equal(polygon.length,original.polygons[p].length,'all glyph holes and separated strokes survive');
       polygon.forEach((ring,r)=>{
         assert.equal(ring.length,original.polygons[p][r].length);
-        ring.forEach(([x,y],i)=>{
-          const [ox,oy]=original.polygons[p][r][i];
-          assert.ok(Math.abs((x-label.x)-(ox-original.x))<1.6e-6,'every horizontal glyph coordinate is unchanged');
-          assert.ok(Math.abs((y-label.y)-(oy-original.y))<1.6e-6,'every vertical glyph coordinate is unchanged');
-        });
       });
     });
+    // Distances to three non-collinear glyph vertices determine every point's
+    // shape, including separate digits and holes, independently of rotation.
+    const points=label.polygons.flat(2),source=original.polygons.flat(2),distance=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]),cross=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+    let second=1,third=2;
+    for(let i=1;i<source.length;i++)if(distance(source[0],source[i])>distance(source[0],source[second]))second=i;
+    for(let i=1;i<source.length;i++)if(Math.abs(cross(source[0],source[second],source[i]))>Math.abs(cross(source[0],source[second],source[third])))third=i;
+    assert.ok(cross(points[0],points[second],points[third])*cross(source[0],source[second],source[third])>0,'the lettering is never mirrored');
+    for(let i=0;i<points.length;i++)for(const anchor of [0,second,third])assert.ok(Math.abs(distance(points[i],points[anchor])-distance(source[i],source[anchor]))<3e-6,'every glyph point retains its distances: no stretching, bending or shrinking');
   }
   directions(result);noCollisions(result);
 }
 
-test('preserved Arabic and Roman hours only move, even after turning or mirroring the SVG or requesting tangent rotation',()=>{
+test('complete Arabic and Roman hours turn as rigid shapes without stretching, bending or shrinking',()=>{
   for(const hourStyle of ['arabic','roman'])for(const numberSize of [70,130])for(const shape of [rectangle,circle,()=>raster((x,y)=>x>=35&&x<125&&y>=10&&y<150),()=>raster((x,y)=>x>=10&&x<150&&y>=25&&y<115)]){
     const raw=shape(),s={...settings,hourStyle,numberSize,hourPreserveNumbers:true,hourPathRotate:true};
     for(const hourPathInset of [0,7]){
       const next={...s,hourPathInset},result=layout(raw,next);assert.equal(result.labels.length,12);unchangedNumbers(result,next);
+      assert.ok(Math.abs(result.labels.find(l=>l.hour===3).rotation)>1.4,'side numbers turn with the edge while keeping their exact shape');
     }
   }
 });

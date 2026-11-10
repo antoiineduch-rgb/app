@@ -21,16 +21,16 @@ test('captured SVG revision and orientation keep old exports isolated from newer
   const key=filamentKey(snapshot),newer=changed({diameter:250});assert.notEqual(filamentKey(newer),key);assert.equal(filamentKey(snapshot),key);
 });
 test('path placement, inset and rotation invalidate hours and paint without rereading source artwork',()=>{
-  const path=changed({hourFollowPath:true,hourPreserveNumbers:false});
+  const path=changed({hourFollowPath:true,hourPreserveNumbers:false,hourPathRotate:false});
   assert.notEqual(layoutKey(path),layoutKey(snapshot));assert.notEqual(paintKey(path),paintKey(snapshot));
   for(const patch of [{hourPathInset:7},{hourPathRotate:true}]){const next={...path,settings:{...path.settings,...patch}};assert.equal(sourceKey(next),sourceKey(path));assert.equal(frameKey(next),frameKey(path));assert.notEqual(layoutKey(next),layoutKey(path));assert.notEqual(filamentKey(next),filamentKey(path));}
   assert.equal(layoutKey(changed({hourPathInset:7,hourPathRotate:true})),layoutKey(snapshot),'inactive path options leave legacy fitting untouched');
 });
-test('preserving numbers refreshes layout and filament paint while ignoring inactive rotation preferences',()=>{
+test('number size preservation and outline rotation independently refresh layout and filament paint',()=>{
   const automatic=changed({hourFollowPath:true,hourPreserveNumbers:false,hourPathRotate:true}),preserved={...automatic,settings:{...automatic.settings,hourPreserveNumbers:true}};
   assert.equal(sourceKey(automatic),sourceKey(preserved));assert.equal(frameKey(automatic),frameKey(preserved));
   assert.notEqual(layoutKey(automatic),layoutKey(preserved));assert.notEqual(filamentKey(automatic),filamentKey(preserved));
   const unturned={...preserved,settings:{...preserved.settings,hourPathRotate:false}};
-  assert.equal(layoutKey(unturned),layoutKey(preserved));assert.equal(paintKey(unturned),paintKey(preserved));
+  assert.notEqual(layoutKey(unturned),layoutKey(preserved));assert.notEqual(paintKey(unturned),paintKey(preserved));
   assert.equal(layoutKey(changed({hourPreserveNumbers:false})),layoutKey(snapshot),'the option does not affect a circular layout');
 });
