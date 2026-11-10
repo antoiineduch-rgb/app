@@ -62,7 +62,9 @@ async function run(window){
   await preset('wave');
   await nativeDrop([svgPath],{beforeDrop:async()=>{assert.equal(await evaluate(()=>document.getElementById('fileDropOverlay').hidden),false);assert.equal(await evaluate(()=>document.getElementById('fileDropOverlay').dataset.blocked),'false');await evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));writeFileSync(join(tmpdir(),'clock-file-drop.png'),(await window.webContents.capturePage()).toPNG());}});
   await ready('Dropped colors.SVG');assert.equal(await evaluate(()=>document.getElementById('uploadPanel').hidden),false);assert.deepEqual(await file('export'),baseline,'file drops retain all geometry and Bambu colors');
-  await click('undo');await wait(()=>document.querySelector('[data-design="wave"]').classList.contains('selected'),'single-step drop undo');await nativeDrop([svgPath],{target:'svgDropZone'});await ready('Dropped colors.SVG');
+  // Undo paints the restored design before its SVG has finished saving. Wait
+  // for the operation to finish before dragging another file onto the window.
+  await click('undo');await wait(()=>!document.getElementById('saveProject').disabled&&document.querySelector('[data-design="wave"]').classList.contains('selected'),'completed single-step drop undo');await nativeDrop([svgPath],{target:'svgDropZone'});await ready('Dropped colors.SVG');
   console.log('PASS native file drops on the preview and upload zone, visible feedback, one-step undo, and byte-identical Bambu color exports');
 
   const before=await file();
