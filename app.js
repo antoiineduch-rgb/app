@@ -14,7 +14,7 @@ import { analyzeSTL,bedFit } from './mesh-analysis.js';
 import {FilamentPreview} from './filament-preview.js';
 import {normalizeFilamentOverrides} from './filament-colors.js';
 import {HoleFitDialog} from './hole-fit-ui.js';
-import {autoHourFit,fitHourLayout,hourLayoutMarkup} from './hour-layout.js';
+import {autoHourFit,followHourPath,fitHourLayout,hourLayoutMarkup} from './hour-layout.js';
 import {RECESS_SKIN,recessDimensions} from './mechanism-recess.js';
 import {raisedMechanismBox,flatFrontOnBed,boxDimensions} from './mechanism-box.js';
 import {artworkPlacement} from './artwork-surface.js';
@@ -56,7 +56,8 @@ let previewMode='design',meshView=null,loadedMeshKey=null,meshPreviewKey=null,me
 let bed={width:220,depth:220},bedPreset='custom';
 try{const saved=JSON.parse(localStorage.getItem('clock-factory-bed')||'null');if(saved&&[saved.width,saved.depth].every(v=>Number.isInteger(v)&&v>=80&&v<=500)){bed={width:saved.width,depth:saved.depth};if(saved.preset==='a1'&&saved.width===256&&saved.depth===256)bedPreset='a1';}}catch{}
 function originalArtwork(settings=state){return settings.design==='custom'&&settings.svgDetail==='artwork';}
-function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,flatFrontOnBed(settings)?'flat':[settings.svgDetail,settings.svgRelief,settings.svgTone],settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)||flatFrontOnBed(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.mechanismMount,settings.mechanismFlatFront,settings.mechanismWall,settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false,settings.deskStand?[settings.standWidth,settings.standDepth,settings.standLean,settings.standClearance,settings.recessHeight,settings.recessClearance]:false]);}
+function hourPathState(settings=state){return followHourPath(settings)?[settings.hourPathInset,settings.hourStyle==='ticks'?false:settings.hourPathRotate]:false;}
+function geometryKey(settings=state){return JSON.stringify([settings.design,settings.design==='custom'?[customRevision,...artworkOrientation,flatFrontOnBed(settings)?'flat':[settings.svgDetail,settings.svgRelief,settings.svgTone],settings.svgBacking,settings.svgBacking?[settings.svgBackingThickness,settings.svgBackingMargin]:null,settings.hourFit,hourPathState(settings)]:null,settings.diameter,settings.thickness,settings.hole,originalArtwork(settings)||flatFrontOnBed(settings)?'smooth':settings.texture,settings.markers,settings.markers?settings.hourStyle:null,settings.markers&&settings.hourStyle!=='ticks'?[settings.numberSize,settings.numberPosition]:null,settings.mechanismRecess?[settings.mechanismMount,settings.mechanismFlatFront,settings.mechanismWall,settings.recessWidth,settings.recessHeight,settings.recessDepth,settings.recessClearance]:false,settings.deskStand?[settings.standWidth,settings.standDepth,settings.standLean,settings.standClearance,settings.recessHeight,settings.recessClearance]:false]);}
 function fileKey(settings=state){return JSON.stringify([geometryKey(settings),settings.exportFormat,settings.exportFormat==='3mf'?[paintKey({settings:{...settings,faceColor:colors[settings.color][1]},revision:customRevision,placement:artworkOrientation}),settings.threeMFTarget,settings.threeMFTarget==='bambu-a1'?[settings.filamentCount,settings.bambuBackColor,Object.entries(settings.bambuColors).sort()]:null]:null]);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),4000);}
 function updateSaveLabel(){
@@ -88,7 +89,7 @@ function faceMarkup(){
 }
 function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   const color=colors[state.color][1],detailed=originalArtwork(),backed=usesSVGBacking(state),flat=flatFrontOnBed(state),visibleTexture=flat?'smooth':state.texture,hourInk=defaultHourInk({...state,faceColor:color});
-  const nextPreviewKey=JSON.stringify([state.design,state.color,visibleTexture,state.markers,state.hourStyle,state.hourColor,state.numberSize,state.numberPosition,state.diameter,state.svgDetail,customRevision,artworkOrientation,backed,state.hourFit,backed||autoHourFit(state)?[state.svgBackingMargin,state.hole]:null]);
+  const nextPreviewKey=JSON.stringify([state.design,state.color,visibleTexture,state.markers,state.hourStyle,state.hourColor,state.numberSize,state.numberPosition,state.diameter,state.svgDetail,customRevision,artworkOrientation,backed,state.hourFit,hourPathState(state),backed||autoHourFit(state)?[state.svgBackingMargin,state.hole]:null]);
   if(nextPreviewKey!==previewKey){
   let ticks='',numberClearance='';
   if(state.markers&&state.hourStyle!=='ticks'){ticks=`<g id="hourNumerals" fill="${hourInk}">${hourNumeralMarkup(state)}</g>`;numberClearance=`<mask id="numberClearanceMask" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><rect width="400" height="400" fill="white"/><g fill="black" stroke="black" stroke-width="${1.2*400/state.diameter}" stroke-linejoin="round">${hourNumeralMarkup(state)}</g></mask>`;}
@@ -137,11 +138,16 @@ function render({forceInputs=false,historyGroup=null,recordHistory=true}={}){
   $('downloadGuide').hidden=lastDownloadKey!==fileKey();
   $('hourStyle').value=state.hourStyle;$('hourStyle').disabled=!state.markers;$('hourColor').value=state.hourColor;$('hourColor').disabled=!state.markers;
   $('hourFit').checked=state.hourFit;$('hourFitControls').hidden=state.design!=='custom'||!state.markers;
+  const following=followHourPath(state);$('hourFollowPath').checked=state.hourFollowPath;$('hourFollowPath').disabled=!state.hourFit;
+  $('hourPathOptions').hidden=!following;$('hourPathInset').value=state.hourPathInset;$('hourPathInsetValue').textContent=state.hourPathInset;
+  $('hourPathRotate').checked=state.hourPathRotate;$('hourPathRotate').disabled=state.hourStyle==='ticks';$('numberPositionControl').hidden=following;
   const fitted=autoHourFit(state)?sourceInfo(designSnapshot()).layout:null;
   $('hourFitStatus').textContent=fitted?`${fitted.labels.length}/12 hours fit${fitted.scale<.999?' · '+Math.round(fitted.scale*100)+'% of requested size':''}.${fitted.missing.length?' A round backing can support the remaining hours.':''}`:'Manual circle placement. Numbers may be clipped at the SVG edge.';
+  if(following){const supported=fitted.labels.filter(label=>label.onBacking).length;$('hourFitStatus').textContent+=` Following the SVG outline.${supported?` ${supported} hours use the backing for support.`:''}${fitted.missing.length?' Reduce the edge distance or add a round backing.':''}`;}
   $('hourFitStatus').dataset.tone=fitted?.missing.length?'warning':'success';$('backingForHours').hidden=!fitted?.missing.length;
   $('numeralOptions').hidden=!state.markers||state.hourStyle==='ticks';
   $('numberPrintHelp').textContent=flat?'Numbers stay upright and use flat color in 3MF. Turn off “Flat front on bed” to restore raised numbers.':'Numbers stay upright and print in relief. SVG fitting adjusts their size and distance when needed; turn it off for manual placement.';
+  if(following)$('numberPrintHelp').textContent=`Numbers ${state.hourPathRotate?'turn with the SVG outline':'stay upright along the SVG outline'}. ${flat?'Use color 3MF to print the flat numbers.':'The print mesh uses the same positions and rotation.'}`;
   for(const id of ['numberSize','numberPosition']){$(id).value=state[id];$(id+'Value').textContent=state[id];}
   $('svgDetailControls').hidden=state.design!=='custom';$('svgDetail').value=state.svgDetail;
   $('svgReliefControls').hidden=!detailed||flat;$('svgRelief').value=state.svgRelief;$('svgReliefValue').textContent=state.svgRelief.toFixed(1);$('svgTone').value=state.svgTone;
@@ -262,16 +268,16 @@ function makeRecessRoom(){
 function enableSupportingBacking(){state.svgBacking=true;makeRecessRoom();render({forceInputs:true});}
 $('backingForHours').onclick=enableSupportingBacking;$('backingForRecess').onclick=enableSupportingBacking;$('backingForStand').onclick=enableSupportingBacking;
 $('inspectStand').onclick=()=>{if(!state.deskStand||importPending||restorePending||deletingArtwork)return;setPreviewMode('print');meshCamera('desk');$('preview').scrollIntoView({behavior:'smooth',block:'start'});};
-['diameter','thickness','hole','markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront','deskStand'].forEach(id=>$(id).addEventListener('input',()=>{
+['diameter','thickness','hole','markers','svgBacking','hourFit','hourFollowPath','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'].forEach(id=>$(id).addEventListener('input',()=>{
   const input=$(id);
-  if(['markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)){state[id]=input.checked;if((id==='mechanismRecess'||id==='svgBacking')&&input.checked)makeRecessRoom();}
+  if(['markers','svgBacking','hourFit','hourFollowPath','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)){state[id]=input.checked;if((id==='mechanismRecess'||id==='svgBacking')&&input.checked)makeRecessRoom();}
   else{
     if(id!=='diameter')input.dataset.editing='true';
     if(!input.validity.valid||input.value===''){validateDimensions();return;}
     state[id]=Number(input.value);
     if(id==='diameter'){delete $('diameterNumber').dataset.editing;$('diameterNumber').value=state.diameter;}
   }
-  validateDimensions();render({historyGroup:['markers','svgBacking','hourFit','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)?null:id});
+  validateDimensions();render({historyGroup:['markers','svgBacking','hourFit','hourFollowPath','hourPathRotate','mechanismRecess','mechanismFlatFront','deskStand'].includes(id)?null:id});
   if(id==='deskStand'&&state.deskStand){setPreviewMode('print');meshCamera('desk');}
 }));
 for(const id of ['recessWidth','recessHeight','recessDepth','recessClearance','mechanismWall','standWidth','standDepth','standLean','standClearance'])$(id).addEventListener('input',()=>{
@@ -285,7 +291,7 @@ for(const id of ['hourStyle','hourColor','exportFormat','svgDetail','svgTone','t
   const value=id==='filamentCount'?Number($(id).value):$(id).value,allowed={hourStyle:['ticks','arabic','roman'],hourColor:['light','dark','auto'],exportFormat:['stl','3mf'],svgDetail:['artwork','silhouette'],svgTone:['contrast','dark','light'],threeMFTarget:['bambu-a1','standard'],filamentCount:[2,4],bambuBackColor:['background','face'],mechanismMount:['box','recess']}[id];
   if(!allowed.includes(value))return;state[id]=value;if(id==='mechanismMount')makeRecessRoom();render();
 });
-for(const id of ['numberSize','numberPosition','svgRelief','svgBackingThickness','svgBackingMargin'])$(id).addEventListener('input',()=>{
+for(const id of ['numberSize','numberPosition','hourPathInset','svgRelief','svgBackingThickness','svgBackingMargin'])$(id).addEventListener('input',()=>{
   if(!$(id).validity.valid)return;state[id]=Number($(id).value);render({historyGroup:id});
 });
 function updateExportFormatUI(){
@@ -863,12 +869,14 @@ function jumpToSetting(entry){
   if(importPending||restorePending||deletingArtwork){toast('Wait for your artwork to finish opening, then choose a setting.');return;}
   if(entry.id==='myProjects'){projectLibrary.open();return;}
   let target=$(entry.id),message='';
-  const svgOnly=['svgDetail','svgRelief','artRotateLeft','svgBacking','hourFit'];
+  const svgOnly=['svgDetail','svgRelief','artRotateLeft','svgBacking','hourFit','hourFollowPath','hourPathInset','hourPathRotate'];
   if(['svgUpload','pasteSvg'].includes(entry.id)||svgOnly.includes(entry.id)){
     tab(true);
     if(!['svgUpload','pasteSvg'].includes(entry.id)&&state.design!=='custom'){target=activeArtwork?$('useArtwork'):$('svgUpload');message='Choose or import SVG artwork to use this setting.';}
     else if(entry.id==='svgRelief'&&flatFrontOnBed(state)){document.querySelector('.advanced-settings').open=true;target=$(state.deskStand?'deskStand':'mechanismFlatFront');message='Flat-front printing pauses raised artwork. The rear-accessory controls explain this option.';}
     else if(entry.id==='svgRelief'&&state.svgDetail!=='artwork'){target=$('svgDetail');message='Choose Original artwork + details to adjust SVG relief.';}
+    else if(['hourFollowPath','hourPathInset','hourPathRotate'].includes(entry.id)&&!state.hourFit){target=$('hourFit');message='Turn on Fit hours to SVG to follow its outline.';}
+    else if(['hourPathInset','hourPathRotate'].includes(entry.id)&&!state.hourFollowPath){target=$('hourFollowPath');message='Turn on Follow SVG outline to adjust its edge distance and rotation.';}
   }
   if(['Size & fit','Mechanism','Stand'].includes(entry.section)&&entry.id!=='diameterNumber'){
     document.querySelector('.advanced-settings').open=true;
@@ -881,7 +889,8 @@ function jumpToSetting(entry){
   }
   if(entry.section==='Hours'){
     if(!state.markers){target=$('markers');message='Turn on hour details to adjust the numbers.';}
-    else if(['numberSize','numberPosition'].includes(entry.id)&&state.hourStyle==='ticks'){target=$('hourStyle');message='Choose Arabic or Roman numbers to adjust their size and position.';}
+    else if(['numberSize','numberPosition','hourPathRotate'].includes(entry.id)&&state.hourStyle==='ticks'){target=$('hourStyle');message='Choose Arabic or Roman numbers to adjust their size, position or rotation.';}
+    else if(entry.id==='numberPosition'&&followHourPath(state)){target=$('hourPathInset');message='Outline placement uses Distance from edge.';}
   }
   if(entry.id==='texture'&&$('texture').hidden){target=flatFrontOnBed(state)?$(state.deskStand?'deskStand':'mechanismFlatFront'):$('svgDetail');if(flatFrontOnBed(state))document.querySelector('.advanced-settings').open=true;else tab(true);message='Surface texture is available with silhouette artwork and raised-front printing.';}
   if(entry.id==='proofPrinted'&&(state.exportFormat!=='3mf'||state.threeMFTarget!=='bambu-a1'||$('filamentProofBody').hidden)){target=$('bambuColorPrint');message='Choose Bambu A1 · colors to edit the printable filament palette.';}

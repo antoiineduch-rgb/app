@@ -1,13 +1,13 @@
 {
   "name": "clock-factory",
-  "version": "1.18.2",
+  "version": "1.19.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.js",
     "dev": "node build.js && node server.js",
     "start": "node build.js && node server.js",
-    "test": "node --test geometry.test.js hour-numerals.test.js hour-mesh.test.js hour-recess.test.js mechanism-box.test.js desk-stand.test.js export-3mf.test.js export-bambu.test.js svg-details.test.js svg-placement.test.js contours.test.js mesh-extrusion.test.js mesh-quality.test.js project.test.js print-readiness.test.js history.test.js mesh-analysis.test.js mesh-store.test.js hole-fit.test.js artwork-keys.test.js file-downloads.test.js settings-finder.test.js server.test.js desktop/assets.test.cjs",
+    "test": "node --test geometry.test.js hour-numerals.test.js hour-mesh.test.js hour-recess.test.js hour-path.test.js mechanism-box.test.js desk-stand.test.js export-3mf.test.js export-bambu.test.js svg-details.test.js svg-placement.test.js contours.test.js mesh-extrusion.test.js mesh-quality.test.js project.test.js print-readiness.test.js history.test.js mesh-analysis.test.js mesh-store.test.js hole-fit.test.js artwork-keys.test.js file-downloads.test.js settings-finder.test.js server.test.js desktop/assets.test.cjs",
     "desktop": "npm run build && electron .",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "dist:win:portable": "npm run build && electron-builder --win portable --x64 --publish never",
@@ -26,7 +26,8 @@
     "test:performance": "npm run build && electron tests/performance.electron.cjs",
     "test:workspace": "npm run build && electron tests/workspace.electron.cjs",
     "test:projects": "npm run build && electron tests/projects.electron.cjs",
-    "test:quick-import": "npm run build && electron tests/quick-import.electron.cjs"
+    "test:quick-import": "npm run build && electron tests/quick-import.electron.cjs",
+    "test:hour-path": "npm run build && electron tests/hour-path.electron.cjs"
   },
   "engines": {
     "node": ">=22.12.0"

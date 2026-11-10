@@ -115,8 +115,8 @@ Choose one of six designs or upload SVG artwork, adjust dimensions and finish, a
 
 The Windows version runs the editor offline in its own desktop window. There are two ways to use it:
 
-- Run `Clock-Factory-1.18.2-Windows-Portable.exe` directly, without installation.
-- Run `Clock-Factory-1.18.2-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
+- Run `Clock-Factory-1.19.0-Windows-Portable.exe` directly, without installation.
+- Run `Clock-Factory-1.19.0-Windows-Setup.exe` to install it, then open **Clock Factory** from the Start menu.
 
 End users do not need Node.js or a development server. SVGs and projects are opened locally; STL, 3MF, and project files are saved on the computer. Download names use the app version, so later versions will have a different version number.
 
@@ -152,9 +152,13 @@ Upload an SVG by choosing a file or dropping it onto the upload area. The import
 
 ## Hour numbers and 3MF
 
-Enable hour details and choose Simple ticks, Numbers (1–12), or Roman (I–XII). Number size and distance from the center are adjustable; labels stay upright when imported SVG artwork is rotated or mirrored. The same built-in vector outlines drive the preview and printed relief. A smooth halo around the numbers keeps texture clear of their edges. **Hour contrast** offers light, dark, or automatic ink. Automatic contrast samples the original SVG beneath each fitted label and prefers existing dark/light source inks, helping preserve the AMS color budget. The A1 quick setup enables it. Earlier projects retain light hours, and contrast choices support undo and project backups.
+Enable hour details and choose Simple ticks, Numbers (1–12), or Roman (I–XII). Number size and distance from the center are adjustable; labels stay upright by default when imported SVG artwork is rotated or mirrored. The same built-in vector outlines drive the preview and printed relief. A smooth halo around the numbers keeps texture clear of their edges. **Hour contrast** offers light, dark, or automatic ink. Automatic contrast samples the original SVG beneath each fitted label and prefers existing dark/light source inks, helping preserve the AMS color budget. The A1 quick setup enables it. Earlier projects retain light hours, and contrast choices support undo and project backups.
 
 **Fit hours to SVG** is enabled by default for uploaded artwork. It moves each complete hour along the correct clock-hand angle, keeping it inside solid material, clear of the shaft opening, and apart from the other hours. When necessary, it reduces all numbers together, with a minimum 4.2 mm numeral height. The status shows how many of the 12 fit and any size reduction. Narrow or disconnected artwork may have no room for all 12; the app blocks an incomplete export and offers **Use a round backing for all 12 hours**. With a backing, the hours can use the full circular face. Turn fitting off to position hours manually using the size and distance controls. Fitting and pocket settings travel with `.clock` backups and support undo.
+
+Enable **Follow SVG outline** under the hour controls to place the hours near the artwork's edge. **Distance from edge** adjusts the inset from 0 to 15 mm; number size remains adjustable. Each hour retains its correct direction from the shaft, so a mechanical movement still tells the right time. Labels avoid the shaft and each other, and fitting keeps complete glyphs supported. With a round backing enabled, the layout still follows the original SVG shape; the backing can carry hours beside thin or missing artwork, which the fit status reports.
+
+Numbers stay upright by default. **Rotate numbers with outline** aligns Arabic or Roman labels with the local edge direction and keeps bottom labels readable. Ticks keep their radial orientation. Outline placement and rotation adapt when the SVG turns or flips and use the same polygons in Design, Print mesh, STL and both 3MF formats. Flat-front A1 printing uses the positions and rotation as color regions. Undo/redo, local restoration, saved clock copies and `.clock` projects retain all three outline settings. Existing projects keep their previous placement until the option is enabled. Ctrl/Cmd+K also finds the outline, inset and rotation controls.
 
 Choose STL or 3MF beside the download button. Both contain the same validated geometry in millimeters. **3MF compatibility** distinguishes printable filament assignments from a visual texture. Switching formats or color limits reuses the prepared mesh. The Windows app supports native Save As dialogs for both formats.
 
@@ -191,5 +195,7 @@ Run `npm run test:guided-studio` for the A1 setup with one-step undo and preserv
 Run `npm run test:mechanism-box` for a thin flat-bed face, real upright walls and open top, unchanged shaft passage, face-down SVG and hour colors, matching STL and both 3MF exports, visible front/back WebGL pixels, dimension validation, optional relief, saved projects and local restoration, thin backing support, and mobile layout. On display-free Linux use the same software WebGL headless flags as `test:studio`.
 
 Run `npm run test:hours-recess` for complete, upright SVG hours after rotation, actual rear pockets and ceiling depth, matching STL and both 3MF geometries, the rear WebGL view, dimension validation, undo and project recovery, thick backing support, preserved SVG colors, and mobile layout. On display-free Linux use the same software WebGL headless flags as `test:studio`.
+
+Run `npm run test:hour-path` for edge placement and inset, readable tangent rotation, SVG orientation, real raised STL geometry under all 12 previewed glyphs, matching 3MF triangles, flat A1 color repainting without physical geometry changes, original filament colors, undo, project/local recovery, real 3D rendering and mobile controls. It uses the same software WebGL headless flags as `test:studio`. `hour-path.test.js` additionally checks correct hour-hand directions, collision-free Arabic/Roman/tick layouts, exact closed meshes, rotated texture clearance, and backing support for disconnected artwork.
 
 For an independent consumer check, install Bambu Studio locally and run `node tests/bambu-reference.cjs /path/to/bambu-studio exported-bambu-a1.3mf`. This opens and saves the file in an isolated temporary profile, then asserts that Studio preserved every palette color and every painted facet/subdivision tree. It never slices, uploads, or prints. The A1 export was checked this way with official Bambu Studio 2.9.1.70.

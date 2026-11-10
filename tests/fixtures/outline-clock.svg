@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 210">
+  <defs><path id="outline" d="M110 8C145 10 164 26 180 52C212 80 208 126 182 145C160 171 124 165 105 188C80 209 44 176 34 155C2 138 8 101 22 82C18 58 46 38 64 29C78 6 94 3 110 8Z"/><clipPath id="face"><use href="#outline"/></clipPath></defs>
+  <use href="#outline" fill="#24382D"/>
+  <g clip-path="url(#face)"><circle cx="68" cy="78" r="27" fill="#E53935"/><path d="M125 110H192V151H125Z" fill="#2855D6"/></g>
+</svg>

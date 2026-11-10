@@ -20,3 +20,9 @@ test('captured SVG revision and orientation keep old exports isolated from newer
   assert.notEqual(sourceKey({...snapshot,revision:8}),sourceKey(snapshot));assert.notEqual(filamentKey({...snapshot,placement:[0,-1,1,0]}),filamentKey(snapshot));
   const key=filamentKey(snapshot),newer=changed({diameter:250});assert.notEqual(filamentKey(newer),key);assert.equal(filamentKey(snapshot),key);
 });
+test('path placement, inset and rotation invalidate hours and paint without rereading source artwork',()=>{
+  const path=changed({hourFollowPath:true});
+  assert.notEqual(layoutKey(path),layoutKey(snapshot));assert.notEqual(paintKey(path),paintKey(snapshot));
+  for(const patch of [{hourPathInset:7},{hourPathRotate:true}]){const next={...path,settings:{...path.settings,...patch}};assert.equal(sourceKey(next),sourceKey(path));assert.equal(frameKey(next),frameKey(path));assert.notEqual(layoutKey(next),layoutKey(path));assert.notEqual(filamentKey(next),filamentKey(path));}
+  assert.equal(layoutKey(changed({hourPathInset:7,hourPathRotate:true})),layoutKey(snapshot),'inactive path options leave legacy fitting untouched');
+});

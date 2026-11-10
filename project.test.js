@@ -78,3 +78,10 @@ test('optional desk stands retain their dimensions in projects and stay off for 
   const old=JSON.parse(serializeProject(settings));for(const key of ['deskStand','standWidth','standDepth','standLean','standClearance'])delete old.settings[key];assert.equal(parseProject(JSON.stringify(old)).settings.deskStand,false);assert.equal(parseProject(JSON.stringify(old)).settings.standClearance,4);
   for(const patch of [{deskStand:'yes'},{standDepth:0},{standWidth:100},{standLean:30},{standClearance:1},{standClearance:21}])assert.throws(()=>parseProject(JSON.stringify({...old,settings:{...old.settings,...patch}})),/project/);
 });
+test('SVG path-hour settings round-trip while legacy projects retain their previous placement',()=>{
+  const settings={...DEFAULT_SETTINGS,design:'custom',hourStyle:'roman',hourFollowPath:true,hourPathInset:3.5,hourPathRotate:true};
+  assert.deepEqual(parseProject(serializeProject(settings,artwork,[0,-1,1,0])),{settings,artwork,orientation:[0,-1,1,0]});
+  const old=JSON.parse(serializeProject(settings,artwork));for(const key of ['hourFollowPath','hourPathInset','hourPathRotate'])delete old.settings[key];
+  assert.equal(parseProject(JSON.stringify(old)).settings.hourFollowPath,false);assert.equal(parseProject(JSON.stringify(old)).settings.hourPathRotate,false);
+  for(const patch of [{hourFollowPath:'yes'},{hourPathRotate:1},{hourPathInset:16},{hourPathInset:2.25}])assert.throws(()=>parseProject(JSON.stringify({...old,settings:{...old.settings,...patch}})),/project/);
+});

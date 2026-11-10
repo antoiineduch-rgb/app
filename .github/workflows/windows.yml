@@ -61,6 +61,9 @@ jobs:
       - name: Test fitted SVG hours and rear movement pockets
         run: npm run test:hours-recess
 
+      - name: Test SVG outline hours, readable rotation, and matching print files
+        run: npm run test:hour-path
+
       - name: Test flat-bed printing and raised movement boxes
         run: npm run test:mechanism-box
 
